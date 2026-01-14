@@ -4,6 +4,7 @@ import random
 import sys
 from logging.handlers import TimedRotatingFileHandler
 import os
+from datetime import datetime, timedelta, timezone
 
 from app.logic import process_project_news, send_log_report
 from projects_config import PROJECTS
@@ -29,8 +30,6 @@ console_handler = logging.StreamHandler()
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
-# === ВОТ ЭТО МЫ ДОБАВИЛИ, ЧТОБЫ УБРАТЬ ШУМ ===
-# Говорим Telethon-у: "Не пиши мне про Connect/Disconnect, пиши только ошибки"
 logging.getLogger('telethon').setLevel(logging.WARNING)
 logging.getLogger('asyncio').setLevel(logging.WARNING)
 
@@ -38,24 +37,24 @@ logging.getLogger('asyncio').setLevel(logging.WARNING)
 MIN_WAIT_MINUTES = 60
 MAX_WAIT_MINUTES = 80
 
+# ЧАСОВОЙ ПОЯС: Владивосток (UTC+10)
+TZ_VLADIVOSTOK = timezone(timedelta(hours=10))
+
 async def main():
     logger.info("🤖 Мульти-бот запущен!")
-    await send_log_report("🚀 Бот перезапущен в мульти-режиме (поддержка нескольких проектов).")
+    await send_log_report("🚀 Бот перезапущен")
     
     while True:
         try:
             logger.info("\n⏰ === НАЧАЛО ЧАСОВОГО ЦИКЛА ===")
             
-            # Пробегаем по списку проектов из projects_config.py
             for project in PROJECTS:
                 p_name = project['name']
                 try:
                     logger.info(f"👉 Обработка проекта: {p_name}")
                     
-                    # Запускаем логику для конкретного проекта
                     await process_project_news(project_conf=project, hours=1.5)
                     
-                    # Небольшая пауза между проектами
                     logger.info("💤 Пауза 30 сек перед следующим проектом...")
                     await asyncio.sleep(30)
                     
@@ -64,11 +63,20 @@ async def main():
                     logger.error(err_text, exc_info=True)
                     await send_log_report(err_text)
 
-            # Когда все проекты прошли, спим большой промежуток
+            # Расчет следующего запуска
             wait_minutes = random.randint(MIN_WAIT_MINUTES, MAX_WAIT_MINUTES)
             wait_seconds = wait_minutes * 60
             
-            logger.info(f"✅ Все проекты обработаны. Сплю {wait_minutes} мин.")
+            now_utc = datetime.now(timezone.utc)
+            next_run_utc = now_utc + timedelta(minutes=wait_minutes)
+            next_run_vdk = next_run_utc.astimezone(TZ_VLADIVOSTOK)
+            next_run_str = next_run_vdk.strftime("%H:%M")
+            
+            logger.info(f"✅ Цикл завершен. Сплю {wait_minutes} мин. Следующий старт (VDK): {next_run_str}")
+            
+            # === ИСПРАВЛЕННАЯ СТРОКА С УТОЧНЕНИЕМ МИНУТ ===
+            await send_log_report(f"💤 **Цикл завершен**\nСледующий запуск через {wait_minutes} мин, ориентировочно в **{next_run_str}.**")
+
             await asyncio.sleep(wait_seconds)
 
         except KeyboardInterrupt:

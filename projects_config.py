@@ -14,7 +14,7 @@ PROJECTS = [
         "name": "primlenta",
         "source_folder_id": 4,        
         "target_channel_id": -1003251105180,
-        "min_score": 6,                
+        "min_score": 7,                
         "prompt_type": "primlentaprompt"       
     },
 ]

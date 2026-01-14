@@ -8,6 +8,7 @@ from app.ai import pick_top_news_batch, check_is_duplicate, generate_summary
 from app.db import add_news, is_exists, get_recent_news
 
 async def send_log_report(text):
+    """Отправляет сообщение в технический канал."""
     client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
     await client.start()
     try:
@@ -71,22 +72,37 @@ async def send_news_with_media(text, news_item, target_channel_id):
     finally:
         await client.disconnect()
 
+
 # === ГЛАВНАЯ ЛОГИКА ===
 async def process_project_news(project_conf, hours=1.6):
     p_name = project_conf['name']
     p_source_id = project_conf['source_folder_id']
     p_target_id = project_conf['target_channel_id']
-    p_min_score = project_conf.get('min_score', 7)
     p_prompt_type = project_conf.get('prompt_type', 'default')
 
-    print(f"\n🚀 ЗАПУСК ПРОЕКТА: {p_name} (Стиль: {p_prompt_type})")
+    print(f"\n🚀 ЗАПУСК ПРОЕКТА: {p_name}")
     
+    # --- СТАТИСТИКА ---
+    stats = {
+        "total_found": 0,
+        "local_filtered": 0,
+        "ai_candidates": 0,
+        "rejected_dupe": 0,
+        "final_score": 0,
+        "winner_source": "None"
+    }
+
+    # 1. Сбор
     raw_news = await get_messages_last_hour(folder_id=p_source_id, hours=hours)
+    stats["total_found"] = len(raw_news)
     
     if not raw_news:
         print(f"📭 {p_name}: Пусто.")
+        # === ОТЧЕТ: ЕСЛИ ПУСТО ===
+        await send_log_report(f"📭 **Проект: {p_name}**\nНет новых сообщений в папке за {hours}ч.")
         return
 
+    # 2. Локальный фильтр (длина + хеш)
     valid_news = []
     for item in raw_news:
         if len(item['text']) < 50: continue
@@ -94,55 +110,72 @@ async def process_project_news(project_conf, hours=1.6):
         if is_exists(p_name, content_hash): continue
         item['hash'] = content_hash
         valid_news.append(item)
+    
+    stats["local_filtered"] = len(valid_news)
 
     if not valid_news:
-        print(f"🧹 {p_name}: Все новости отсеяны локальным фильтром.")
+        print(f"🧹 {p_name}: Все отсеяны локальным фильтром.")
+        # === ОТЧЕТ: ЕСЛИ ВСЕ ОТСЕЯНЫ ФИЛЬТРОМ ===
+        await send_log_report(f"🧹 **Проект: {p_name}**\nНайдено: {len(raw_news)}, но все отсеяны (короткие или уже были).")
         return
 
+    # 3. AI Отбор (Batch)
     print(f"📤 {p_name}: Отправляю в AI {len(valid_news)} заголовков...")
-
-    # Батчинг
     candidates = pick_top_news_batch(valid_news, prompt_type=p_prompt_type)
+    stats["ai_candidates"] = len(candidates)
 
     if not candidates:
-        print(f"📉 {p_name}: AI не выбрал ничего достойного.")
+        print(f"📉 {p_name}: AI вернул пустой список.")
+        # === ОТЧЕТ: ЕСЛИ AI НИЧЕГО НЕ ВЫБРАЛ ===
+        await send_log_report(f"📉 **Проект: {p_name}**\nНайдено: {len(valid_news)} | Кандидатов: 0 (ничего важного/интересного).")
         return
 
     final_winner = None
     winner_summary = ""
     recent_history = get_recent_news(project_name=p_name, days=2)
 
+    # 4. Перебор кандидатов
     for cand in candidates:
         idx = cand['id']
         score = cand.get('score', 0)
         
         if idx >= len(valid_news): continue
-        if score < p_min_score:
-            print(f"   Skip: News #{idx} score {score} < {p_min_score}")
-            continue
-
+        
         candidate_news = valid_news[idx]
-        print(f"   🧐 Проверяю кандидата #{idx} (Score: {score})...")
+        print(f"   🧐 Кандидат #{idx} (Score: {score}). Проверяем на дубли...")
 
         if check_is_duplicate(candidate_news['text'], recent_history):
-            print("   ⛔ ДУБЛЬ (уже было).")
+            stats["rejected_dupe"] += 1
+            print("   ⛔ ДУБЛЬ.")
             continue
         
-        print("   ✍️ Генерирую пост...")
+        print("   ✍️ Генерация поста...")
         summary = generate_summary(candidate_news['text'], prompt_type=p_prompt_type)
         if not summary: continue
 
         final_winner = candidate_news
         winner_summary = summary
         final_winner['score'] = score
+        stats["final_score"] = score
+        stats["winner_source"] = candidate_news['source_name']
         break
 
     if not final_winner:
-        print(f"🤷‍♂️ {p_name}: Все кандидаты отсеяны.")
+        print(f"🤷‍♂️ {p_name}: Все кандидаты оказались дублями.")
+        # === ОТЧЕТ: ЕСЛИ ВСЕ КАНДИДАТЫ ОТПАЛИ ===
+        fail_report = (
+            f"⚠️ **Проект: {p_name}**\n"
+            f"🔎 Найдено: {stats['total_found']} | Кандидатов: {stats['ai_candidates']}\n"
+            f"🗑 Отсеяно как дубли: {stats['rejected_dupe']}\n"
+            f"🤷‍♂️ Ничего не опубликовано."
+        )
+        await send_log_report(fail_report)
         return
 
+    # 5. Публикация
     link_source = final_winner['link']
     display_name = final_winner['display_name'].lower()
+    
     final_message = f"{winner_summary} [{display_name}]({link_source})"
     
     success, post_link, ch_title = await send_news_with_media(final_message, final_winner, p_target_id)
@@ -156,8 +189,27 @@ async def process_project_news(project_conf, hours=1.6):
             score=final_winner['score'],
             source_link=link_source
         )
-        print(f"✅ {p_name}: Опубликовано в {ch_title}!")
-        report_link = post_link if post_link else link_source
-        await send_log_report(f"🤖 **Проект: {p_name}**\n✅ Опубликовано в: {ch_title}\n🔗 [Ссылка на пост]({report_link})")
+        print(f"✅ {p_name}: Успех!")
+        
+        # === ОТЧЕТ ОБ УСПЕХЕ ===
+        first_sentence = winner_summary.split('\n')[0].split('. ')[0].strip()
+        if len(first_sentence) > 60:
+            first_sentence = first_sentence[:60] + "..."
+        
+        if post_link:
+            final_link_str = f"🔗 [{first_sentence}]({post_link})"
+        else:
+            final_link_str = f"🔗 {first_sentence} (без ссылки)"
+        
+        report_text = (
+            f"🚀 **Проект: {p_name}**\n"
+            f"📊 Найдено: {stats['total_found']} | Кандидатов: {stats['ai_candidates']} | Отсеяно дублей: {stats['rejected_dupe']}\n"
+            f"🏆 Источник: {stats['winner_source']} ({stats['final_score']}/10)\n"
+            f"{final_link_str}"
+        )
+        await send_log_report(report_text)
+        
     else:
         print(f"❌ {p_name}: Ошибка публикации.")
+        await send_log_report(f"❌ **Проект: {p_name}**\nОшибка при попытке отправить пост в канал.")
+        
