@@ -13,8 +13,16 @@ PROJECTS = [
     {
         "name": "primlenta",
         "source_folder_id": 4,        
-        "target_channel_id": -1003251105180,
+        "target_channel_id": -1002518512643,
         "min_score": 7,                
         "prompt_type": "primlentaprompt"       
+    },
+
+            {
+        "name": "ussurlenta",
+        "source_folder_id": 2,        
+        "target_channel_id": -1002846373339,
+        "min_score": 7,                
+        "prompt_type": "ussurlentaprompt"       
     },
 ]
