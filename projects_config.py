@@ -18,11 +18,19 @@ PROJECTS = [
         "prompt_type": "primlentaprompt"       
     },
 
-            {
+    {
         "name": "ussurlenta",
         "source_folder_id": 2,        
         "target_channel_id": -1002846373339,
         "min_score": 7,                
         "prompt_type": "ussurlentaprompt"       
     },
+
+    {
+        "name": "neuro",
+        "source_folder_id": 7,        
+        "target_channel_id": -1002641528167,
+        "min_score": 7,                
+        "prompt_type": "neuroprompt"       
+    },    
 ]
