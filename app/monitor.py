@@ -2,14 +2,11 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from telethon.tl.functions.messages import GetDialogFiltersRequest
+from telethon.extensions import html
 
 from app.config import API_ID, API_HASH, SESSION_NAME
 
-# Функция теперь принимает folder_id явно
-async def get_messages_last_hour(folder_id, hours=1):
-    client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
-    await client.start()
-
+async def get_messages_last_hour(client, folder_id, hours=1):
     print(f"🔄 [Folder {folder_id}] Сбор новостей за {hours} ч...")
 
     response = await client(GetDialogFiltersRequest())
@@ -21,14 +18,12 @@ async def get_messages_last_hour(folder_id, hours=1):
 
     target_folder = None
     for f in dialogs:
-        # Используем переданный аргумент
         if getattr(f, 'id', None) == folder_id:
             target_folder = f
             break
             
     if not target_folder:
         print(f"❌ Папка {folder_id} не найдена!")
-        await client.disconnect()
         return []
 
     peers = target_folder.include_peers
@@ -50,8 +45,16 @@ async def get_messages_last_hour(folder_id, hours=1):
                 if message.date < time_threshold:
                     break
                 
-                text_content = message.text or message.message
-                if not text_content:
+                if not message.text:
+                    continue
+                
+                try:
+                    text_content = html.unparse(message.text, message.entities or [])
+                except Exception as e:
+                    print(f"⚠️ Ошибка парсинга HTML: {e}")
+                    text_content = message.text
+
+                if not text_content: 
                     continue
 
                 if channel_username:
@@ -74,9 +77,7 @@ async def get_messages_last_hour(folder_id, hours=1):
                 })
 
         except Exception as e:
-            # print(f"⚠️ Ошибка обработки канала: {e}") # Можно раскомментить для дебага
             continue
 
-    await client.disconnect()
     print(f"✅ [Folder {folder_id}] Собрано: {len(collected_news)}")
     return collected_news
