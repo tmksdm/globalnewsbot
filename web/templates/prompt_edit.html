@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_new %}Новый промпт{% else %}Редактирование: {{ prompt.prompt_type }}{% endif %}{% endblock %}
+
+{% block content %}
+
+<h1>{% if is_new %}Добавить промпт{% else %}Редактировать промпт: {{ prompt.prompt_type }}{% endif %}</h1>
+
+<a href="{{ url_for('main.prompts_list') }}">&larr; Вернуться к списку</a>
+
+<article style="margin-top: 1rem;">
+    <form method="POST"
+          action="{% if is_new %}{{ url_for('main.prompts_add') }}{% else %}{{ url_for('main.prompts_edit', prompt_type=prompt.prompt_type) }}{% endif %}">
+
+        <!-- Тип промпта -->
+        {% if is_new %}
+        <label for="prompt_type">Тип промпта (prompt_type)</label>
+        <input type="text" id="prompt_type" name="prompt_type" value="{{ prompt.prompt_type }}" placeholder="Например: tech_news" required>
+        <small>Уникальный идентификатор промпта (латиница, цифры, подчёркивание, дефис). Потом выбирается в настройках проекта.</small>
+        {% else %}
+        <label>Тип промпта</label>
+        <input type="text" value="{{ prompt.prompt_type }}" disabled>
+        <small>Тип промпта нельзя изменить после создания.</small>
+        {% endif %}
+
+        <!-- role -->
+        <label for="role">Role (роль AI)</label>
+        <textarea id="role" name="role" rows="4" placeholder="Опишите роль AI-ассистента…" required>{{ prompt.role }}</textarea>
+        <small>Системная роль, которую AI принимает при обработке новостей. Например: «Ты — редактор новостного канала о технологиях».</small>
+
+        <!-- criteria -->
+        <label for="criteria">Criteria (критерии отбора)</label>
+        <textarea id="criteria" name="criteria" rows="6" placeholder="Опишите критерии, по которым AI оценивает новости…" required>{{ prompt.criteria }}</textarea>
+        <small>Критерии, по которым AI оценивает и отбирает новости (что важно, что не важно, какой score ставить).</small>
+
+        <!-- summary_style -->
+        <label for="summary_style">Summary Style (стиль пересказа)</label>
+        <textarea id="summary_style" name="summary_style" rows="6" placeholder="Опишите, как AI должен пересказывать новость…" required>{{ prompt.summary_style }}</textarea>
+        <small>Инструкции для AI, как именно пересказать/переписать новость (длина, тон, формат, язык).</small>
+
+        <button type="submit">{% if is_new %}Добавить промпт{% else %}Сохранить изменения{% endif %}</button>
+    </form>
+</article>
+
+{% endblock %}

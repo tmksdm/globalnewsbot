@@ -2,7 +2,8 @@ from flask import Blueprint, render_template, request, redirect, url_for, sessio
 from app.config import PANEL_PASSWORD
 from app.db import (
     get_stats, get_published_news, get_all_projects, get_project_by_id,
-    add_project, update_project, get_all_prompts
+    add_project, update_project, get_all_prompts, get_prompt_by_type,
+    add_prompt, update_prompt
 )
 from web.auth import login_required
 
@@ -283,4 +284,148 @@ def projects_edit(project_id):
         is_new=False,
         project=project,
         prompt_types=prompt_types,
+    )
+
+
+# ========================
+# ПРОМПТЫ
+# ========================
+
+@bp.route("/prompts")
+@login_required
+def prompts_list():
+    """Список всех промптов."""
+    prompts = get_all_prompts()
+    return render_template("prompts_list.html", prompts=prompts)
+
+
+@bp.route("/prompts/add", methods=["GET", "POST"])
+@login_required
+def prompts_add():
+    """Добавление нового промпта."""
+    if request.method == "POST":
+        prompt_type = request.form.get("prompt_type", "").strip()
+        role = request.form.get("role", "").strip()
+        criteria = request.form.get("criteria", "").strip()
+        summary_style = request.form.get("summary_style", "").strip()
+
+        # Валидация
+        errors = []
+        if not prompt_type:
+            errors.append("Тип промпта (prompt_type) обязателен.")
+        if not role:
+            errors.append("Поле «role» обязательно.")
+        if not criteria:
+            errors.append("Поле «criteria» обязательно.")
+        if not summary_style:
+            errors.append("Поле «summary_style» обязательно.")
+
+        # prompt_type должен быть латиницей, без пробелов (простая проверка)
+        if prompt_type and not prompt_type.replace("_", "").replace("-", "").isalnum():
+            errors.append("prompt_type должен содержать только латиницу, цифры, дефис и подчёркивание.")
+
+        if errors:
+            for error in errors:
+                flash(error, "error")
+            return render_template(
+                "prompt_edit.html",
+                is_new=True,
+                prompt={
+                    'prompt_type': prompt_type,
+                    'role': role,
+                    'criteria': criteria,
+                    'summary_style': summary_style,
+                },
+            )
+
+        # Пробуем добавить в базу
+        success = add_prompt(
+            prompt_type=prompt_type,
+            role=role,
+            criteria=criteria,
+            summary_style=summary_style,
+        )
+
+        if success:
+            flash(f"Промпт «{prompt_type}» добавлен!", "success")
+            return redirect(url_for("main.prompts_list"))
+        else:
+            flash(f"Промпт с типом «{prompt_type}» уже существует.", "error")
+            return render_template(
+                "prompt_edit.html",
+                is_new=True,
+                prompt={
+                    'prompt_type': prompt_type,
+                    'role': role,
+                    'criteria': criteria,
+                    'summary_style': summary_style,
+                },
+            )
+
+    # GET — пустая форма
+    return render_template(
+        "prompt_edit.html",
+        is_new=True,
+        prompt={
+            'prompt_type': '',
+            'role': '',
+            'criteria': '',
+            'summary_style': '',
+        },
+    )
+
+
+@bp.route("/prompts/<prompt_type>/edit", methods=["GET", "POST"])
+@login_required
+def prompts_edit(prompt_type):
+    """Редактирование существующего промпта."""
+    prompt = get_prompt_by_type(prompt_type)
+    if not prompt:
+        flash("Промпт не найден.", "error")
+        return redirect(url_for("main.prompts_list"))
+
+    if request.method == "POST":
+        role = request.form.get("role", "").strip()
+        criteria = request.form.get("criteria", "").strip()
+        summary_style = request.form.get("summary_style", "").strip()
+
+        # Валидация
+        errors = []
+        if not role:
+            errors.append("Поле «role» обязательно.")
+        if not criteria:
+            errors.append("Поле «criteria» обязательно.")
+        if not summary_style:
+            errors.append("Поле «summary_style» обязательно.")
+
+        if errors:
+            for error in errors:
+                flash(error, "error")
+            return render_template(
+                "prompt_edit.html",
+                is_new=False,
+                prompt={
+                    'prompt_type': prompt_type,
+                    'role': role,
+                    'criteria': criteria,
+                    'summary_style': summary_style,
+                },
+            )
+
+        # Обновляем в базе
+        update_prompt(
+            prompt_type=prompt_type,
+            role=role,
+            criteria=criteria,
+            summary_style=summary_style,
+        )
+
+        flash(f"Промпт «{prompt_type}» обновлён!", "success")
+        return redirect(url_for("main.prompts_list"))
+
+    # GET — показываем форму с текущими данными
+    return render_template(
+        "prompt_edit.html",
+        is_new=False,
+        prompt=prompt,
     )
