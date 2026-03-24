@@ -3,7 +3,7 @@ from app.config import PANEL_PASSWORD
 from app.db import (
     get_stats, get_published_news, get_all_projects, get_project_by_id,
     add_project, update_project, get_all_prompts, get_prompt_by_type,
-    add_prompt, update_prompt
+    add_prompt, update_prompt, get_project_names
 )
 from web.auth import login_required
 
@@ -428,4 +428,61 @@ def prompts_edit(prompt_type):
         "prompt_edit.html",
         is_new=False,
         prompt=prompt,
+    )
+
+
+# ========================
+# ЛОГ ПУБЛИКАЦИЙ
+# ========================
+
+@bp.route("/logs")
+@login_required
+def logs():
+    """Таблица всех опубликованных новостей с фильтрацией."""
+
+    # Читаем параметры фильтрации из URL (query string)
+    # Например: /logs?project=tech_news&date_from=2025-01-01&date_to=2025-01-31&page=2
+    selected_project = request.args.get("project", "").strip()
+    date_from = request.args.get("date_from", "").strip()
+    date_to = request.args.get("date_to", "").strip()
+    page = request.args.get("page", 1, type=int)
+
+    # Сколько записей на одной странице
+    per_page = 30
+
+    # Защита: страница не может быть меньше 1
+    if page < 1:
+        page = 1
+
+    # offset — сколько записей пропустить (для пагинации)
+    # Страница 1 → пропустить 0, Страница 2 → пропустить 30, и т.д.
+    offset = (page - 1) * per_page
+
+    # Получаем новости из БД с учётом фильтров
+    # Запрашиваем per_page + 1 записей, чтобы понять, есть ли следующая страница
+    news_list = get_published_news(
+        project_name=selected_project if selected_project else None,
+        date_from=date_from if date_from else None,
+        date_to=date_to if date_to else None,
+        limit=per_page + 1,
+        offset=offset,
+    )
+
+    # Если получили больше записей, чем per_page — значит есть следующая страница
+    has_next = len(news_list) > per_page
+    # Но показываем только per_page записей (лишнюю отрезаем)
+    news_list = news_list[:per_page]
+
+    # Список всех проектов для выпадающего фильтра
+    project_names = get_project_names()
+
+    return render_template(
+        "logs.html",
+        news_list=news_list,
+        project_names=project_names,
+        selected_project=selected_project,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        has_next=has_next,
     )
