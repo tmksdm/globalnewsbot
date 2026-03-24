@@ -4,5 +4,114 @@
 
 {% block content %}
 <h1>Дашборд</h1>
-<p>Панель управления работает! Статистика появится на следующем этапе.</p>
+
+<!-- =============================== -->
+<!-- ОБЩАЯ СТАТИСТИКА                -->
+<!-- =============================== -->
+<div class="grid">
+    <article>
+        <header>Сегодня</header>
+        <p class="stat-number">{{ total_stats.today }}</p>
+    </article>
+    <article>
+        <header>За неделю</header>
+        <p class="stat-number">{{ total_stats.week }}</p>
+    </article>
+    <article>
+        <header>Всего</header>
+        <p class="stat-number">{{ total_stats.total }}</p>
+    </article>
+    <article>
+        <header>Средний score</header>
+        <p class="stat-number">{{ total_stats.avg_score }}</p>
+    </article>
+</div>
+
+<!-- =============================== -->
+<!-- СТАТИСТИКА ПО ПРОЕКТАМ          -->
+<!-- =============================== -->
+<h2>Проекты</h2>
+
+{% if project_stats %}
+<div class="overflow-auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Проект</th>
+                <th>Режим</th>
+                <th>Сегодня</th>
+                <th>Неделя</th>
+                <th>Всего</th>
+                <th>Ср. score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in project_stats %}
+            <tr>
+                <td>
+                    <strong>{{ p.name }}</strong>
+                    {% if not p.is_active %}
+                        <span class="badge badge-off">ВЫКЛ</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.test_mode %}
+                        <span class="badge badge-test">ТЕСТ</span>
+                    {% else %}
+                        <span class="badge badge-prod">ПРОД</span>
+                    {% endif %}
+                </td>
+                <td>{{ p.today }}</td>
+                <td>{{ p.week }}</td>
+                <td>{{ p.total }}</td>
+                <td>{{ p.avg_score }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>Проектов пока нет. Добавьте проект на странице «Проекты».</p>
+{% endif %}
+
+<!-- =============================== -->
+<!-- ПОСЛЕДНИЕ ПУБЛИКАЦИИ            -->
+<!-- =============================== -->
+<h2>Последние публикации</h2>
+
+{% if recent_news %}
+<div class="overflow-auto">
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Проект</th>
+                <th>Score</th>
+                <th>Текст</th>
+                <th>Источник</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for news in recent_news %}
+            <tr>
+                <td style="white-space: nowrap;">{{ news.published_at[:16] if news.published_at else '—' }}</td>
+                <td>{{ news.project_name }}</td>
+                <td>{{ news.score }}</td>
+                <td>{{ news.summary[:150] if news.summary else '—' }}{% if news.summary and news.summary|length > 150 %}…{% endif %}</td>
+                <td>
+                    {% if news.source_link %}
+                        <a href="{{ news.source_link }}" target="_blank">ссылка</a>
+                    {% else %}
+                        —
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>Пока нет публикаций.</p>
+{% endif %}
+
 {% endblock %}
