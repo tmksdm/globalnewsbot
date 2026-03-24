@@ -12,8 +12,13 @@ SESSION_NAME = 'news_aggregator_session'
 
 # AI
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
-# Модель, которую ты выбрал
 AI_MODEL = "arcee-ai/trinity-large-preview:free"
 
 # === Канал для технических отчетов ===
 LOG_CHANNEL_ID = int(os.getenv("LOG_CHANNEL_ID"))
+
+# === Веб-панель ===
+PANEL_PASSWORD = os.getenv("PANEL_PASSWORD", "admin")
+
+# === Тестовый режим ===
+TEST_CHANNEL_ID = int(os.getenv("TEST_CHANNEL_ID", 0))
