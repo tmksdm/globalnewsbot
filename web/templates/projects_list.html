@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+
+{% block title %}Проекты{% endblock %}
+
+{% block content %}
+<h1>Проекты</h1>
+
+<a href="{{ url_for('main.projects_add') }}" role="button">+ Добавить проект</a>
+
+{% if projects %}
+<div class="overflow-auto">
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Название</th>
+                <th>Статус</th>
+                <th>Режим</th>
+                <th>min_score</th>
+                <th>prompt_type</th>
+                <th>source_folder_id</th>
+                <th>target_channel_id</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for p in projects %}
+            <tr>
+                <td>{{ p.id }}</td>
+                <td><strong>{{ p.name }}</strong></td>
+                <td>
+                    {% if p.is_active %}
+                        <span class="badge badge-prod">ВКЛ</span>
+                    {% else %}
+                        <span class="badge badge-off">ВЫКЛ</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.test_mode %}
+                        <span class="badge badge-test">ТЕСТ</span>
+                    {% else %}
+                        <span class="badge badge-prod">ПРОД</span>
+                    {% endif %}
+                </td>
+                <td>{{ p.min_score }}</td>
+                <td>{{ p.prompt_type }}</td>
+                <td>{{ p.source_folder_id }}</td>
+                <td>{{ p.target_channel_id }}</td>
+                <td>
+                    <a href="{{ url_for('main.projects_edit', project_id=p.id) }}" role="button" class="outline">Редактировать</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<p>Проектов пока нет. Нажмите кнопку выше, чтобы добавить первый проект.</p>
+{% endif %}
+
+{% endblock %}

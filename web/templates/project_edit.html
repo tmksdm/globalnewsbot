@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_new %}Новый проект{% else %}Редактирование: {{ project.name }}{% endif %}{% endblock %}
+
+{% block content %}
+
+<h1>{% if is_new %}Добавить проект{% else %}Редактировать проект{% endif %}</h1>
+
+<a href="{{ url_for('main.projects_list') }}">&larr; Вернуться к списку</a>
+
+<article style="margin-top: 1rem;">
+    <form method="POST"
+          action="{% if is_new %}{{ url_for('main.projects_add') }}{% else %}{{ url_for('main.projects_edit', project_id=project.id) }}{% endif %}">
+
+        <!-- Название проекта -->
+        <label for="name">Название проекта</label>
+        <input type="text" id="name" name="name" value="{{ project.name }}" placeholder="Например: tech_news" required>
+        <small>Уникальное имя проекта (латиница, без пробелов). Используется в базе данных.</small>
+
+        <!-- ID папки-источника -->
+        <label for="source_folder_id">ID папки-источника (Telegram)</label>
+        <input type="text" id="source_folder_id" name="source_folder_id" value="{{ project.source_folder_id }}" placeholder="Например: 123456789" required>
+        <small>Числовой ID папки Telegram, откуда бот читает новости.</small>
+
+        <!-- ID целевого канала -->
+        <label for="target_channel_id">ID целевого канала (Telegram)</label>
+        <input type="text" id="target_channel_id" name="target_channel_id" value="{{ project.target_channel_id }}" placeholder="Например: -1001234567890" required>
+        <small>Числовой ID канала Telegram, куда бот публикует новости.</small>
+
+        <!-- min_score -->
+        <label for="min_score">Минимальный score (1–10)</label>
+        <input type="number" id="min_score" name="min_score" value="{{ project.min_score }}" min="1" max="10" required>
+        <small>Новости с оценкой ниже этого порога не будут опубликованы.</small>
+
+        <!-- prompt_type -->
+        <label for="prompt_type">Тип промпта</label>
+        {% if prompt_types %}
+        <select id="prompt_type" name="prompt_type">
+            {% for pt in prompt_types %}
+            <option value="{{ pt }}" {% if project.prompt_type == pt %}selected{% endif %}>{{ pt }}</option>
+            {% endfor %}
+        </select>
+        {% else %}
+        <input type="text" id="prompt_type" name="prompt_type" value="{{ project.prompt_type }}" placeholder="default">
+        {% endif %}
+        <small>Какой промпт использовать для AI-обработки новостей этого проекта.</small>
+
+        {% if not is_new %}
+        <!-- Галочки — только для редактирования (при создании проект по умолчанию активен, тест выключен) -->
+        <fieldset>
+            <label>
+                <input type="checkbox" name="is_active" value="1" {% if project.is_active %}checked{% endif %} role="switch">
+                Проект активен
+            </label>
+            <small>Когда выключено — бот не обрабатывает этот проект.</small>
+        </fieldset>
+
+        <fieldset>
+            <label>
+                <input type="checkbox" name="test_mode" value="1" {% if project.test_mode %}checked{% endif %} role="switch">
+                Тестовый режим
+            </label>
+            <small>Когда включено — бот публикует в тестовый канал вместо боевого. Новости не сохраняются как опубликованные.</small>
+        </fieldset>
+        {% endif %}
+
+        <button type="submit">{% if is_new %}Добавить проект{% else %}Сохранить изменения{% endif %}</button>
+    </form>
+</article>
+
+{% endblock %}
