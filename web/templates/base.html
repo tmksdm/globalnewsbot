@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Панель управления{% endblock %} — NewsBot</title>
+    <!-- Pico CSS — минималистичный CSS-фреймворк, делает красиво без написания CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        /* Немного кастомных стилей */
+        nav {
+            margin-bottom: 1rem;
+        }
+        .flash-error {
+            color: var(--pico-del-color);
+            font-weight: bold;
+        }
+        .flash-success {
+            color: var(--pico-ins-color);
+            font-weight: bold;
+        }
+        .badge {
+            display: inline-block;
+            padding: 0.15em 0.5em;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+        }
+        .badge-test {
+            background: #fff3cd;
+            color: #856404;
+        }
+        .badge-prod {
+            background: #d4edda;
+            color: #155724;
+        }
+        .badge-off {
+            background: #e2e3e5;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+
+        {% if session.get("logged_in") %}
+        <!-- Навигация — показывается только после входа -->
+        <nav>
+            <ul>
+                <li><strong>NewsBot Panel</strong></li>
+            </ul>
+            <ul>
+                <li><a href="{{ url_for('main.dashboard') }}">Дашборд</a></li>
+                <li><a href="#">Проекты</a></li>
+                <li><a href="#">Промпты</a></li>
+                <li><a href="#">Лог</a></li>
+                <li><a href="{{ url_for('main.logout') }}">Выход</a></li>
+            </ul>
+        </nav>
+        {% endif %}
+
+        <!-- Flash-сообщения (ошибки, уведомления) -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <p class="flash-{{ category }}">{{ message }}</p>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <!-- Основное содержимое страницы -->
+        {% block content %}{% endblock %}
+
+    </main>
+</body>
+</html>
