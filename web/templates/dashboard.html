@@ -94,7 +94,7 @@
         <tbody>
             {% for news in recent_news %}
             <tr>
-                <td style="white-space: nowrap;">{{ news.published_at[:16] if news.published_at else '—' }}</td>
+                <td style="white-space: nowrap;">{{ news.published_at_local[:16] if news.published_at_local else '—' }}</td>
                 <td>{{ news.project_name }}</td>
                 <td>{{ news.score }}</td>
                 <td>{{ news.summary[:150] if news.summary else '—' }}{% if news.summary and news.summary|length > 150 %}…{% endif %}</td>

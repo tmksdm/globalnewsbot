@@ -68,7 +68,7 @@
             <tr>
                 <td>{{ news.id }}</td>
                 <td style="white-space: nowrap;">
-                    {{ news.published_at[:16] if news.published_at else '—' }}
+                    {{ news.published_at_local[:16] if news.published_at_local else '—' }}
                 </td>
                 <td>{{ news.project_name }}</td>
                 <td>{{ news.score }}</td>

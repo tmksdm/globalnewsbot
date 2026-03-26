@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+from datetime import timezone, timedelta
 
 DB_NAME = "news.db"
 
@@ -280,12 +281,16 @@ def get_stats(project_name=None):
     """
     Возвращает статистику: сегодня, за неделю, всего, средний score.
     Если project_name=None — по всем проектам.
+    Время считается по Владивостоку (UTC+10).
     """
     conn = get_connection()
     cursor = conn.cursor()
 
-    today = datetime.date.today().isoformat()
-    week_ago = (datetime.date.today() - datetime.timedelta(days=7)).isoformat()
+    # Считаем "сегодня" по Владивостоку, а не по UTC
+    tz_vlad = timezone(timedelta(hours=10))
+    now_vlad = datetime.datetime.now(tz_vlad)
+    today = now_vlad.date().isoformat()
+    week_ago = (now_vlad.date() - datetime.timedelta(days=7)).isoformat()
 
     where = ""
     params = []
@@ -297,14 +302,18 @@ def get_stats(project_name=None):
     cursor.execute(f'SELECT COUNT(*) as cnt FROM processed_news {where}', params)
     total = cursor.fetchone()['cnt']
 
-    # Сегодня
-    today_where = f"WHERE date(published_at) = ?" if not project_name else f"WHERE date(published_at) = ? AND project_name = ?"
+    # Сегодня (сдвигаем published_at на +10 часов перед сравнением)
+    today_where = "WHERE date(published_at, '+10 hours') = ?"
+    if project_name:
+        today_where += " AND project_name = ?"
     today_params = [today] if not project_name else [today, project_name]
     cursor.execute(f'SELECT COUNT(*) as cnt FROM processed_news {today_where}', today_params)
     today_count = cursor.fetchone()['cnt']
 
     # За неделю
-    week_where = f"WHERE date(published_at) >= ?" if not project_name else f"WHERE date(published_at) >= ? AND project_name = ?"
+    week_where = "WHERE date(published_at, '+10 hours') >= ?"
+    if project_name:
+        week_where += " AND project_name = ?"
     week_params = [week_ago] if not project_name else [week_ago, project_name]
     cursor.execute(f'SELECT COUNT(*) as cnt FROM processed_news {week_where}', week_params)
     week_count = cursor.fetchone()['cnt']
@@ -321,6 +330,7 @@ def get_stats(project_name=None):
         'week': week_count,
         'avg_score': avg_score
     }
+
 
 
 def get_published_news(project_name=None, date_from=None, date_to=None, limit=50, offset=0):
@@ -346,7 +356,8 @@ def get_published_news(project_name=None, date_from=None, date_to=None, limit=50
         where = "WHERE " + " AND ".join(conditions)
 
     cursor.execute(f'''
-        SELECT * FROM processed_news
+        SELECT *, datetime(published_at, '+10 hours') as published_at_local
+        FROM processed_news
         {where}
         ORDER BY published_at DESC
         LIMIT ? OFFSET ?
