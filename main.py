@@ -59,18 +59,52 @@ def load_projects():
         return FILE_PROJECTS
 
 
+async def ensure_connected(client):
+    """
+    Проверяет соединение с Telegram и переподключается при необходимости.
+    Вызывается перед каждым циклом работы.
+    """
+    if not client.is_connected():
+        logger.warning("🔌 Клиент отключён от Telegram. Переподключаюсь...")
+        try:
+            await client.connect()
+            # После reconnect нужно убедиться что авторизация на месте
+            if not await client.is_user_authorized():
+                logger.critical("🔥 Клиент не авторизован после переподключения!")
+                raise ConnectionError("Not authorized after reconnect")
+            logger.info("✅ Переподключение успешно!")
+        except Exception as e:
+            logger.error(f"❌ Ошибка переподключения: {e}")
+            raise
+
+
+async def safe_send_log(client, text):
+    """
+    Отправляет лог-сообщение, предварительно проверив соединение.
+    Если не получается — просто логирует ошибку, не падает.
+    """
+    try:
+        await ensure_connected(client)
+        await send_log_report(client, text)
+    except Exception as e:
+        logger.error(f"⚠️ Не удалось отправить лог в Telegram: {e}")
+
+
 async def main():
     # === ОДИН КЛИЕНТ НА ВЕСЬ ЖИЗНЕННЫЙ ЦИКЛ ===
     client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
     await client.start()
 
     logger.info("🤖 Мульти-бот запущен!")
-    await send_log_report(client, "🚀 Бот перезапущен")
+    await safe_send_log(client, "🚀 Бот перезапущен")
 
     try:
         while True:
             try:
                 logger.info("\n⏰ === НАЧАЛО ЧАСОВОГО ЦИКЛА ===")
+
+                # Проверяем соединение ПЕРЕД началом цикла
+                await ensure_connected(client)
 
                 # Загружаем проекты КАЖДЫЙ ЦИКЛ (чтобы изменения из веб-панели подхватывались)
                 projects = load_projects()
@@ -80,15 +114,29 @@ async def main():
                     try:
                         logger.info(f"👉 Обработка проекта: {p_name}")
 
+                        # Проверяем соединение перед каждым проектом тоже
+                        await ensure_connected(client)
+
                         await process_project_news(client, project_conf=project, hours=1.5)
 
                         logger.info("💤 Пауза 30 сек перед следующим проектом...")
                         await asyncio.sleep(30)
 
+                    except ConnectionError as e:
+                        err_text = f"🔌 Потеря соединения в проекте {p_name}: {e}"
+                        logger.error(err_text)
+                        # Пробуем переподключиться и продолжить
+                        try:
+                            await ensure_connected(client)
+                            await safe_send_log(client, err_text)
+                        except Exception:
+                            logger.error("❌ Не удалось восстановить соединение, жду следующий цикл.")
+                            break  # Выходим из цикла проектов, ждём следующую итерацию
+
                     except Exception as e:
                         err_text = f"⚠️ Ошибка внутри проекта {p_name}: {e}"
                         logger.error(err_text, exc_info=True)
-                        await send_log_report(client, err_text)
+                        await safe_send_log(client, err_text)
 
                 # Расчет следующего запуска
                 wait_minutes = random.randint(MIN_WAIT_MINUTES, MAX_WAIT_MINUTES)
@@ -102,8 +150,8 @@ async def main():
                 logger.info(
                     f"✅ Цикл завершен. Сплю {wait_minutes} мин. Следующий старт (VDK): {next_run_str}")
 
-                await send_log_report(client,
-                                      f"💤 **Цикл завершен**\nСледующий запуск через {wait_minutes} мин, ориентировочно в **{next_run_str}.**")
+                await safe_send_log(client,
+                                    f"💤 **Цикл завершен**\nСледующий запуск через {wait_minutes} мин, ориентировочно в **{next_run_str}.**")
 
                 await asyncio.sleep(wait_seconds)
 
@@ -112,7 +160,7 @@ async def main():
                 sys.exit()
             except Exception as e:
                 logger.critical(f"🔥 Критическая ошибка в Main Loop: {e}", exc_info=True)
-                await send_log_report(client, f"🔥 Критическая ошибка Main: {e}")
+                await safe_send_log(client, f"🔥 Критическая ошибка Main: {e}")
                 await asyncio.sleep(600)
     finally:
         await client.disconnect()
