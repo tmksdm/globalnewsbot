@@ -8,7 +8,7 @@ DB_NAME = "news.db"
 def get_connection():
     """Возвращает соединение с базой данных."""
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # Чтобы результаты были как словари
+    conn.row_factory = sqlite3.Row
     return conn
 
 
@@ -38,7 +38,7 @@ def init_db():
         print("🛠 Миграция: добавляю project_name в processed_news...")
         cursor.execute("ALTER TABLE processed_news ADD COLUMN project_name TEXT DEFAULT 'default'")
 
-    # --- Таблица проектов (НОВАЯ) ---
+    # --- Таблица проектов ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS projects (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,14 +53,13 @@ def init_db():
         )
     ''')
 
-    # Миграция: добавляем test_mode если его нет (для будущих обновлений)
     cursor.execute("PRAGMA table_info(projects)")
     proj_columns = [info[1] for info in cursor.fetchall()]
     if "test_mode" not in proj_columns:
         print("🛠 Миграция: добавляю test_mode в projects...")
         cursor.execute("ALTER TABLE projects ADD COLUMN test_mode INTEGER DEFAULT 0")
 
-    # --- Таблица промптов (НОВАЯ) ---
+    # --- Таблица промптов ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS prompts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +70,21 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
+    ''')
+
+    # --- НОВОЕ: Таблица уже виденных новостей (для экономии AI-запросов) ---
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS seen_news (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    # Индекс для быстрого поиска
+    cursor.execute('''
+        CREATE INDEX IF NOT EXISTS idx_seen_news_hash
+        ON seen_news (project_name, content_hash)
     ''')
 
     conn.commit()
@@ -112,6 +126,46 @@ def is_exists(project_name, content_hash):
     return exists
 
 
+# --- НОВОЕ: Функции для seen_news ---
+
+def is_seen(project_name, content_hash):
+    """Проверяет, видели ли мы уже эту новость (отправляли ли в AI)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT 1 FROM seen_news
+        WHERE content_hash = ? AND project_name = ?
+    ''', (content_hash, project_name))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
+def mark_as_seen(project_name, hashes):
+    """Помечает список хешей как виденные. hashes — список строк."""
+    if not hashes:
+        return
+    conn = get_connection()
+    cursor = conn.cursor()
+    for h in hashes:
+        cursor.execute('''
+            INSERT OR IGNORE INTO seen_news (project_name, content_hash)
+            VALUES (?, ?)
+        ''', (project_name, h))
+    conn.commit()
+    conn.close()
+
+
+def cleanup_seen_news(days=3):
+    """Удаляет старые записи из seen_news, чтобы таблица не росла бесконечно."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    limit_date = datetime.datetime.now() - datetime.timedelta(days=days)
+    cursor.execute('DELETE FROM seen_news WHERE seen_at < ?', (limit_date,))
+    conn.commit()
+    conn.close()
+
+
 def get_recent_news(project_name, days=2):
     """Достает историю ТОЛЬКО для текущего проекта."""
     conn = get_connection()
@@ -124,7 +178,6 @@ def get_recent_news(project_name, days=2):
     ''', (limit_date, project_name))
     rows = cursor.fetchall()
     conn.close()
-    # Возвращаем как список кортежей (для совместимости с ai.py)
     return [(row['summary'], row['original_text']) for row in rows]
 
 
@@ -286,7 +339,6 @@ def get_stats(project_name=None):
     conn = get_connection()
     cursor = conn.cursor()
 
-    # Считаем "сегодня" по Владивостоку, а не по UTC
     tz_vlad = timezone(timedelta(hours=10))
     now_vlad = datetime.datetime.now(tz_vlad)
     today = now_vlad.date().isoformat()
@@ -302,7 +354,7 @@ def get_stats(project_name=None):
     cursor.execute(f'SELECT COUNT(*) as cnt FROM processed_news {where}', params)
     total = cursor.fetchone()['cnt']
 
-    # Сегодня (сдвигаем published_at на +10 часов перед сравнением)
+    # Сегодня
     today_where = "WHERE date(published_at, '+10 hours') = ?"
     if project_name:
         today_where += " AND project_name = ?"
@@ -330,7 +382,6 @@ def get_stats(project_name=None):
         'week': week_count,
         'avg_score': avg_score
     }
-
 
 
 def get_published_news(project_name=None, date_from=None, date_to=None, limit=50, offset=0):

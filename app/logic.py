@@ -6,7 +6,7 @@ from telethon import TelegramClient
 from app.config import API_ID, API_HASH, SESSION_NAME, LOG_CHANNEL_ID, TEST_CHANNEL_ID
 from app.monitor import get_messages_last_hour
 from app.ai import pick_top_news_batch, check_is_duplicate, generate_summary
-from app.db import add_news, is_exists, get_recent_news
+from app.db import add_news, is_exists, get_recent_news, is_seen, mark_as_seen, cleanup_seen_news
 
 
 async def send_log_report(client, text):
@@ -102,6 +102,7 @@ async def process_project_news(client, project_conf, hours=1.6):
     stats = {
         "total_found": 0,
         "local_filtered": 0,
+        "already_seen": 0,
         "ai_candidates": 0,
         "rejected_dupe": 0,
         "final_score": 0,
@@ -117,24 +118,40 @@ async def process_project_news(client, project_conf, hours=1.6):
         await send_log_report(client, f"📭 **Проект: {p_name}** [{mode_label}]\nНет новых сообщений в папке за {hours}ч.")
         return
 
-    # 2. Локальный фильтр
+    # 2. Локальный фильтр + фильтр уже виденных
     valid_news = []
+    seen_count = 0
     for item in raw_news:
         if len(item['text']) < 50:
             continue
         content_hash = hashlib.md5(item['text'].encode()).hexdigest()
+
+        # Уже опубликовано?
         if is_exists(p_name, content_hash):
             continue
+
+        # НОВОЕ: Уже отправляли в AI (но не опубликовали)?
+        if is_seen(p_name, content_hash):
+            seen_count += 1
+            continue
+
         item['hash'] = content_hash
         valid_news.append(item)
 
     stats["local_filtered"] = len(valid_news)
+    stats["already_seen"] = seen_count
 
     if not valid_news:
-        print(f"🧹 {p_name}: Все отсеяны локальным фильтром.")
-        await send_log_report(client,
-                              f"🧹 **Проект: {p_name}** [{mode_label}]\nНайдено: {len(raw_news)}, но все отсеяны (короткие или уже были).")
+        print(f"🧹 {p_name}: Все отсеяны локальным фильтром (из них уже видели: {seen_count}).")
+        # Если все новости уже были в AI — не пишем в лог, это нормальная ситуация
+        if seen_count == 0:
+            await send_log_report(client,
+                                  f"🧹 **Проект: {p_name}** [{mode_label}]\nНайдено: {len(raw_news)}, но все отсеяны (короткие или уже были).")
         return
+
+    # НОВОЕ: Помечаем все новости как виденные ПЕРЕД отправкой в AI
+    all_hashes = [item['hash'] for item in valid_news]
+    mark_as_seen(p_name, all_hashes)
 
     # 3. AI Отбор
     print(f"📤 {p_name}: Отправляю в AI {len(valid_news)} заголовков...")
@@ -196,9 +213,7 @@ async def process_project_news(client, project_conf, hours=1.6):
     link_source = final_winner['link']
     display_name = final_winner['display_name'].lower()
 
-    # Формируем текст поста
     if p_test_mode:
-        # Тестовый режим — добавляем метку
         final_message = f"[ТЕСТ: {p_name}]\n\n{winner_summary} <a href='{link_source}'>{display_name}</a>"
     else:
         final_message = f"{winner_summary} <a href='{link_source}'>{display_name}</a>"
@@ -207,7 +222,6 @@ async def process_project_news(client, project_conf, hours=1.6):
 
     if success:
         if not p_test_mode:
-            # В ПРОД-режиме сохраняем в базу
             add_news(
                 project_name=p_name,
                 content_hash=final_winner['hash'],
@@ -218,7 +232,6 @@ async def process_project_news(client, project_conf, hours=1.6):
             )
             print(f"✅ {p_name}: Опубликовано в ПРОД!")
         else:
-            # В ТЕСТ-режиме НЕ сохраняем (чтобы новость могла опубликоваться по-настоящему потом)
             print(f"🧪 {p_name}: Опубликовано в ТЕСТ-канал (в базу НЕ сохранено).")
 
         clean_for_log = re.sub('<[^<]+?>', '', winner_summary)
@@ -231,7 +244,7 @@ async def process_project_news(client, project_conf, hours=1.6):
 
         report_text = (
             f"🚀 <b>Проект: {p_name}</b> [{mode_label}]\n"
-            f"📊 Найдено: {stats['total_found']} | Кандидатов: {stats['ai_candidates']} | Отсеяно дублей: {stats['rejected_dupe']}\n"
+            f"📊 Найдено: {stats['total_found']} | Новых: {stats['local_filtered']} | Кандидатов: {stats['ai_candidates']} | Дублей: {stats['rejected_dupe']}\n"
             f"🏆 Источник: {stats['winner_source']} ({stats['final_score']}/10)\n"
             f"{final_link_str}"
         )
