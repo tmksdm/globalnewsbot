@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from telethon import TelegramClient
 from app.config import API_ID, API_HASH, SESSION_NAME
 from app.logic import process_project_news, send_log_report
-from app.db import get_active_projects, cleanup_seen_news
+from app.db import get_active_projects, cleanup_seen_news, cleanup_old_records
 
 
 # Фолбэк — если в базе нет проектов, берём из файла
@@ -104,8 +104,9 @@ async def main():
             try:
                 logger.info("\n⏰ === НАЧАЛО ЧАСОВОГО ЦИКЛА ===")
 
-                # Чистим старые записи seen_news (старше 3 дней)
+                # Чистим старые записи
                 cleanup_seen_news(days=3)
+                cleanup_old_records(days=5)
 
                 # Проверяем соединение ПЕРЕД началом цикла
                 await ensure_connected(client)
