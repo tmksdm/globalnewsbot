@@ -106,7 +106,7 @@ async def main():
 
                 # Чистим старые записи
                 cleanup_seen_news(days=3)
-                cleanup_old_records(days=5)
+                cleanup_old_records(days=7)
 
                 # Проверяем соединение ПЕРЕД началом цикла
                 await ensure_connected(client)
