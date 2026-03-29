@@ -65,7 +65,7 @@ def pick_top_news_batch(news_list, prompt_type="default"):
     }
 
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
         response.raise_for_status()
         content = response.json()['choices'][0]['message']['content']
         parsed = json.loads(_clean_json_response(content))
@@ -90,7 +90,7 @@ def generate_summary(text, prompt_type="default"):
         ]
     }
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
         response.raise_for_status()
         content = response.json()['choices'][0]['message']['content']
         parsed = json.loads(_clean_json_response(content))
@@ -124,7 +124,7 @@ def check_is_duplicate(new_text, old_news_list):
     }
 
     try:
-        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data)
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
         response.raise_for_status()
         result = response.json()['choices'][0]['message']['content']
         parsed = json.loads(_clean_json_response(result))
