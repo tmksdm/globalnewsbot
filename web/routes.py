@@ -437,6 +437,45 @@ def prompts_edit(prompt_type):
         prompt=prompt,
     )
 
+# ========================
+# УПРАВЛЕНИЕ БОТОМ
+# ========================
+
+@bp.route("/bot/restart", methods=["POST"])
+@login_required
+def bot_restart():
+    """Перезапуск бота через systemd."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["sudo", "systemctl", "restart", "newsbot.service"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            flash("Бот перезапущен!", "success")
+        else:
+            flash(f"Ошибка: {result.stderr}", "error")
+    except Exception as e:
+        flash(f"Ошибка: {e}", "error")
+
+    return redirect(url_for("main.dashboard"))
+
+
+@bp.route("/bot/status")
+@login_required
+def bot_status():
+    """Проверка статуса бота."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "newsbot.service"],
+            capture_output=True, text=True, timeout=5
+        )
+        status = result.stdout.strip()
+    except Exception:
+        status = "unknown"
+
+    return {"status": status}
 
 # ========================
 # ЛОГ ПУБЛИКАЦИЙ

@@ -6,6 +6,32 @@
 <h1>Дашборд</h1>
 
 <!-- =============================== -->
+<!-- СТАТУС И УПРАВЛЕНИЕ БОТОМ       -->
+<!-- =============================== -->
+<div style="display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem;">
+    <span id="bot-status">⏳ Проверяю...</span>
+    <form method="POST" action="{{ url_for('main.bot_restart') }}" style="margin: 0;"
+          onsubmit="return confirm('Перезапустить бота?')">
+        <button type="submit" class="secondary" style="padding: 0.3rem 0.8rem; font-size: 0.85rem;">
+            🔄 Перезапустить бота
+        </button>
+    </form>
+</div>
+
+<script>
+fetch("{{ url_for('main.bot_status') }}")
+    .then(r => r.json())
+    .then(data => {
+        const el = document.getElementById("bot-status");
+        if (data.status === "active") {
+            el.innerHTML = "🟢 Бот работает";
+        } else {
+            el.innerHTML = "🔴 Бот не работает";
+        }
+    });
+</script>
+
+<!-- =============================== -->
 <!-- ОБЩАЯ СТАТИСТИКА                -->
 <!-- =============================== -->
 <div class="grid">
