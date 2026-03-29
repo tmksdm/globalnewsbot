@@ -3,7 +3,7 @@ from app.config import PANEL_PASSWORD
 from app.db import (
     get_stats, get_published_news, get_all_projects, get_project_by_id,
     add_project, update_project, get_all_prompts, get_prompt_by_type,
-    add_prompt, update_prompt, get_project_names
+    add_prompt, update_prompt, get_project_names, get_total_stats
 )
 from web.auth import login_required
 
@@ -51,22 +51,29 @@ def dashboard():
     # Получаем список проектов из БД
     projects = get_all_projects()
 
+    # Общая статистика за всё время (из счётчика)
+    all_time_stats = get_total_stats()
+
     # Собираем статистику по КАЖДОМУ проекту
     project_stats = []
     for project in projects:
         stats = get_stats(project_name=project['name'])
+        total_project = get_total_stats(project_name=project['name'])
         project_stats.append({
             'name': project['name'],
             'is_active': project['is_active'],
             'test_mode': project['test_mode'],
             'today': stats['today'],
             'week': stats['week'],
-            'total': stats['total'],
-            'avg_score': stats['avg_score'],
+            'total': total_project['total'],
+            'avg_score': total_project['avg_score'],
         })
 
-    # Общая статистика (по всем проектам)
+    # Статистика за сегодня/неделю (из processed_news, там точные данные за 5 дней)
     total_stats = get_stats()
+    # Подменяем "всего" и "средний score" на данные из вечного счётчика
+    total_stats['total'] = all_time_stats['total']
+    total_stats['avg_score'] = all_time_stats['avg_score']
 
     # Последние 20 публикаций
     recent_news = get_published_news(limit=20)

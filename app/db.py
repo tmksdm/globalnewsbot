@@ -87,6 +87,16 @@ def init_db():
         ON seen_news (project_name, content_hash)
     ''')
 
+    # --- Таблица счётчиков публикаций (для вечной статистики) ---
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS publish_counts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_name TEXT NOT NULL,
+            score INTEGER DEFAULT 0,
+            published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')    
+
     conn.commit()
     conn.close()
 
@@ -427,6 +437,34 @@ def get_project_names():
     conn.close()
     return [row['project_name'] for row in rows]
 
+def add_publish_count(project_name, score):
+    """Добавляет запись в счётчик публикаций (лёгкая таблица без текстов)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO publish_counts (project_name, score)
+        VALUES (?, ?)
+    ''', (project_name, score))
+    conn.commit()
+    conn.close()
+
+
+def get_total_stats(project_name=None):
+    """Возвращает общее количество и средний score за всё время из счётчика."""
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if project_name:
+        cursor.execute('SELECT COUNT(*) as cnt, AVG(score) as avg_score FROM publish_counts WHERE project_name = ?', (project_name,))
+    else:
+        cursor.execute('SELECT COUNT(*) as cnt, AVG(score) as avg_score FROM publish_counts')
+
+    row = cursor.fetchone()
+    conn.close()
+    return {
+        'total': row['cnt'] if row['cnt'] else 0,
+        'avg_score': round(row['avg_score'], 1) if row['avg_score'] else 0
+    }
 
 # Инициализация БД при импорте
 init_db()

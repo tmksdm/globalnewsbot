@@ -6,7 +6,7 @@ from telethon import TelegramClient
 from app.config import API_ID, API_HASH, SESSION_NAME, LOG_CHANNEL_ID, TEST_CHANNEL_ID
 from app.monitor import get_messages_last_hour
 from app.ai import pick_top_news_batch, check_is_duplicate, generate_summary
-from app.db import add_news, is_exists, get_recent_news, is_seen, mark_as_seen, cleanup_seen_news
+from app.db import add_news, is_exists, get_recent_news, is_seen, mark_as_seen, cleanup_seen_news, add_publish_count
 
 
 async def send_log_report(client, text):
@@ -230,6 +230,7 @@ async def process_project_news(client, project_conf, hours=1.6):
                 score=final_winner['score'],
                 source_link=link_source
             )
+            add_publish_count(p_name, final_winner['score'])  # <-- новая строка
             print(f"✅ {p_name}: Опубликовано в ПРОД!")
         else:
             print(f"🧪 {p_name}: Опубликовано в ТЕСТ-канал (в базу НЕ сохранено).")
