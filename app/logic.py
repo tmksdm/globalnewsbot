@@ -20,10 +20,13 @@ async def send_log_report(client, text):
 def fix_formatting(text):
     if not text:
         return text
+    # Если AI вернул markdown вместо HTML — конвертируем
     text = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', text)
     text = re.sub(r'__(.*?)__', r'<i>\1</i>', text)
     text = re.sub(r'\[(.*?)\]\((.*?)\)', r'<a href="\2">\1</a>', text)
-    return text
+    # Убираем тройные+ переносы строк (оставляем максимум двойной)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 async def send_news_with_media(client, text, news_item, target_channel_id):
