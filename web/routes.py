@@ -64,6 +64,7 @@ def dashboard():
             'name': project['name'],
             'is_active': project['is_active'],
             'test_mode': project['test_mode'],
+            'publish_mode': project.get('publish_mode', 'summary'),
             'today': stats['today'],
             'week': stats['week'],
             'total': total_project['total'],
@@ -112,6 +113,7 @@ def projects_add():
         target_channel_id = request.form.get("target_channel_id", "").strip()
         min_score = request.form.get("min_score", "7").strip()
         prompt_type = request.form.get("prompt_type", "default").strip()
+        publish_mode = request.form.get("publish_mode", "summary").strip()
 
         errors = []
         if not name:
@@ -141,6 +143,10 @@ def projects_add():
             errors.append("min_score должен быть числом.")
             min_score_int = 7
 
+        if publish_mode not in ('summary', 'repost'):
+            errors.append("Режим публикации должен быть 'summary' или 'repost'.")
+            publish_mode = 'summary'
+
         if errors:
             for error in errors:
                 flash(error, "error")
@@ -153,6 +159,7 @@ def projects_add():
                     'target_channel_id': target_channel_id,
                     'min_score': min_score,
                     'prompt_type': prompt_type,
+                    'publish_mode': publish_mode,
                 },
                 prompt_types=prompt_types,
             )
@@ -163,6 +170,7 @@ def projects_add():
             target_channel_id=target_channel_id_int,
             min_score=min_score_int,
             prompt_type=prompt_type,
+            publish_mode=publish_mode,
         )
 
         if success:
@@ -179,6 +187,7 @@ def projects_add():
                     'target_channel_id': target_channel_id,
                     'min_score': min_score,
                     'prompt_type': prompt_type,
+                    'publish_mode': publish_mode,
                 },
                 prompt_types=prompt_types,
             )
@@ -192,6 +201,7 @@ def projects_add():
             'target_channel_id': '',
             'min_score': 7,
             'prompt_type': 'default',
+            'publish_mode': 'summary',
         },
         prompt_types=prompt_types,
     )
@@ -215,6 +225,7 @@ def projects_edit(project_id):
         target_channel_id = request.form.get("target_channel_id", "").strip()
         min_score = request.form.get("min_score", "7").strip()
         prompt_type = request.form.get("prompt_type", "default").strip()
+        publish_mode = request.form.get("publish_mode", "summary").strip()
         is_active = 1 if request.form.get("is_active") else 0
         test_mode = 1 if request.form.get("test_mode") else 0
 
@@ -242,6 +253,10 @@ def projects_edit(project_id):
             errors.append("min_score должен быть числом.")
             min_score_int = project['min_score']
 
+        if publish_mode not in ('summary', 'repost'):
+            errors.append("Режим публикации должен быть 'summary' или 'repost'.")
+            publish_mode = project.get('publish_mode', 'summary')
+
         if errors:
             for error in errors:
                 flash(error, "error")
@@ -252,6 +267,7 @@ def projects_edit(project_id):
                 'target_channel_id': target_channel_id,
                 'min_score': min_score,
                 'prompt_type': prompt_type,
+                'publish_mode': publish_mode,
                 'is_active': is_active,
                 'test_mode': test_mode,
             }
@@ -269,6 +285,7 @@ def projects_edit(project_id):
             target_channel_id=target_channel_id_int,
             min_score=min_score_int,
             prompt_type=prompt_type,
+            publish_mode=publish_mode,
             is_active=is_active,
             test_mode=test_mode,
         )

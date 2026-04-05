@@ -137,6 +137,56 @@ def generate_summary(text, prompt_type="default"):
         return None
 
 
+def clean_selfpromo(text):
+    """
+    Отправляет текст в AI с задачей: убрать саморекламу, оставить всё остальное как есть.
+    Возвращает очищенный текст (plain text, без HTML).
+    """
+    model = _get_model_or_fail()
+
+    system_prompt = """Ты — текстовый фильтр. Твоя единственная задача — удалить саморекламу из конца текста.
+
+ЧТО УДАЛЯТЬ:
+- Призывы подписаться на канал/группу/чат
+- Ссылки на другие соцсети (Instagram, YouTube, Twitter/X, TikTok, VK и т.д.)
+- Упоминания других Telegram-каналов (@channel_name) в рекламном контексте
+- Фразы типа "Подписывайся", "Ставь реакцию", "Поделись с друзьями", "Наш сайт:", "Больше новостей тут"
+- Рекламные блоки, промокоды, партнёрские ссылки
+- Хештеги в конце поста (#новости #подписывайся и т.п.)
+
+ЧТО НЕ ТРОГАТЬ:
+- Весь основной текст новости — НЕ МЕНЯЙ НИ СЛОВА
+- Ссылки внутри текста, которые являются частью новости (источники, документы)
+- Упоминания каналов, если они — часть новости (например "как сообщил канал @...")
+- Форматирование и переносы строк — сохраняй как есть
+
+ФОРМАТ ОТВЕТА (строго JSON):
+{"cleaned_text": "Очищенный текст..."}
+
+Если рекламы нет — верни текст без изменений."""
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"Текст поста:\n{text}"}
+        ]
+    }
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        content = response.json()['choices'][0]['message']['content']
+        parsed = json.loads(_clean_json_response(content))
+        return parsed.get("cleaned_text", text)
+    except Exception as e:
+        print(f"❌ AI Clean Selfpromo Error: {e}")
+        return text  # При ошибке возвращаем оригинал
+
+
 def check_is_duplicate(new_text, old_news_list):
     """Старая AI-дедупликация. Больше не используется (заменена на локальную в app/dedup.py).
     Оставлена на случай, если захочешь вернуть."""

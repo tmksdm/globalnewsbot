@@ -49,6 +49,7 @@ def init_db():
             prompt_type TEXT DEFAULT 'default',
             is_active INTEGER DEFAULT 1,
             test_mode INTEGER DEFAULT 0,
+            publish_mode TEXT DEFAULT 'summary',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -58,6 +59,9 @@ def init_db():
     if "test_mode" not in proj_columns:
         print("🛠 Миграция: добавляю test_mode в projects...")
         cursor.execute("ALTER TABLE projects ADD COLUMN test_mode INTEGER DEFAULT 0")
+    if "publish_mode" not in proj_columns:
+        print("🛠 Миграция: добавляю publish_mode в projects...")
+        cursor.execute("ALTER TABLE projects ADD COLUMN publish_mode TEXT DEFAULT 'summary'")
 
     # --- Таблица промптов ---
     cursor.execute('''
@@ -242,15 +246,15 @@ def get_project_by_id(project_id):
     return dict(row) if row else None
 
 
-def add_project(name, source_folder_id, target_channel_id, min_score=7, prompt_type='default'):
+def add_project(name, source_folder_id, target_channel_id, min_score=7, prompt_type='default', publish_mode='summary'):
     """Добавляет новый проект."""
     try:
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO projects (name, source_folder_id, target_channel_id, min_score, prompt_type)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (name, source_folder_id, target_channel_id, min_score, prompt_type))
+            INSERT INTO projects (name, source_folder_id, target_channel_id, min_score, prompt_type, publish_mode)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (name, source_folder_id, target_channel_id, min_score, prompt_type, publish_mode))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -266,7 +270,8 @@ def update_project(project_id, **kwargs):
     Пример: update_project(1, min_score=8, is_active=0)
     """
     allowed_fields = ['name', 'source_folder_id', 'target_channel_id',
-                      'min_score', 'prompt_type', 'is_active', 'test_mode']
+                      'min_score', 'prompt_type', 'is_active', 'test_mode',
+                      'publish_mode']
     updates = []
     values = []
     for key, value in kwargs.items():

@@ -66,6 +66,8 @@ async def get_messages_last_hour(client, folder_id, hours=1):
 
                 collected_news.append({
                     "text": text_content,
+                    "raw_text": message.text,
+                    "entities": message.entities,
                     "date": message.date,
                     "link": link,
                     "source_name": channel_title,

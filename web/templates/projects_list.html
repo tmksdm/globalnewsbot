@@ -16,6 +16,7 @@
                 <th>Название</th>
                 <th>Статус</th>
                 <th>Режим</th>
+                <th>Публикация</th>
                 <th>min_score</th>
                 <th>prompt_type</th>
                 <th>source_folder_id</th>
@@ -40,6 +41,13 @@
                         <span class="badge badge-test">ТЕСТ</span>
                     {% else %}
                         <span class="badge badge-prod">ПРОД</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if p.publish_mode == 'repost' %}
+                        <span class="badge badge-repost">РЕПОСТ</span>
+                    {% else %}
+                        <span class="badge badge-summary">САММАРИ</span>
                     {% endif %}
                 </td>
                 <td>{{ p.min_score }}</td>

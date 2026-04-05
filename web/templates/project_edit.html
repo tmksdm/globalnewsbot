@@ -33,7 +33,7 @@
         <small>Новости с оценкой ниже этого порога не будут опубликованы.</small>
 
         <!-- prompt_type -->
-        <label for="prompt_type">Тип промпта</label>
+        <label for="prompt_type">Тип промпта (тематика отбора)</label>
         {% if prompt_types %}
         <select id="prompt_type" name="prompt_type">
             {% for pt in prompt_types %}
@@ -43,7 +43,15 @@
         {% else %}
         <input type="text" id="prompt_type" name="prompt_type" value="{{ project.prompt_type }}" placeholder="default">
         {% endif %}
-        <small>Какой промпт использовать для AI-обработки новостей этого проекта.</small>
+        <small>Какой промпт использовать для AI-отбора новостей (определяет тематику).</small>
+
+        <!-- publish_mode -->
+        <label for="publish_mode">Режим публикации</label>
+        <select id="publish_mode" name="publish_mode">
+            <option value="summary" {% if project.get('publish_mode', 'summary') == 'summary' %}selected{% endif %}>Саммари — AI пересказывает новость</option>
+            <option value="repost" {% if project.get('publish_mode', 'summary') == 'repost' %}selected{% endif %}>Репост — оригинальный текст, AI только удаляет рекламу</option>
+        </select>
+        <small>«Саммари» — бот генерирует пересказ. «Репост» — бот копирует оригинал как есть, убирая только саморекламу в конце.</small>
 
         {% if not is_new %}
         <!-- Галочки — только для редактирования (при создании проект по умолчанию активен, тест выключен) -->
