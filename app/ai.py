@@ -1,6 +1,6 @@
 import json
 import requests
-from app.config import OPENROUTER_API_KEY, AI_MODEL
+from app.config import OPENROUTER_API_KEY, get_ai_model
 from app.prompts import (
     THEME_SETTINGS,
     COMMON_BATCH_RULES,
@@ -13,6 +13,16 @@ from app.db import get_prompt_by_type
 def _clean_json_response(content):
     content = content.replace("```json", "").replace("```", "").strip()
     return content
+
+
+def _get_model_or_fail():
+    """
+    Возвращает имя модели. Если не задана — выбрасывает ошибку.
+    """
+    model = get_ai_model()
+    if not model:
+        raise ValueError("❌ AI-модель не задана! Зайдите в веб-панель → Настройки и укажите модель.")
+    return model
 
 
 def get_combined_prompt(prompt_type, task_type):
@@ -44,6 +54,7 @@ def pick_top_news_batch(news_list, prompt_type="default"):
     if not news_list:
         return []
 
+    model = _get_model_or_fail()
     system_prompt = get_combined_prompt(prompt_type, 'batch')
 
     batch_text = ""
@@ -57,7 +68,7 @@ def pick_top_news_batch(news_list, prompt_type="default"):
     }
 
     data = {
-        "model": AI_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Список новостей:\n{batch_text}"}
@@ -76,6 +87,7 @@ def pick_top_news_batch(news_list, prompt_type="default"):
 
 
 def generate_summary(text, prompt_type="default"):
+    model = _get_model_or_fail()
     system_prompt = get_combined_prompt(prompt_type, 'summary')
 
     headers = {
@@ -83,7 +95,7 @@ def generate_summary(text, prompt_type="default"):
         "Content-Type": "application/json"
     }
     data = {
-        "model": AI_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"Текст новости:\n{text}"}
@@ -104,6 +116,8 @@ def check_is_duplicate(new_text, old_news_list):
     if not old_news_list:
         return False
 
+    model = _get_model_or_fail()
+
     history_text = ""
     for idx, item in enumerate(old_news_list):
         history_text += f"{idx+1}. {item[0]}\n"
@@ -116,7 +130,7 @@ def check_is_duplicate(new_text, old_news_list):
     user_content = f"СПИСОК СТАРЫХ:\n{history_text}\n\nНОВАЯ:\n{new_text}"
 
     data = {
-        "model": AI_MODEL,
+        "model": model,
         "messages": [
             {"role": "system", "content": DEDUPLICATION_SYSTEM_PROMPT},
             {"role": "user", "content": user_content}

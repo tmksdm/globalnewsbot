@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+
+{% block content %}
+<h2>Настройки</h2>
+
+<article>
+    <header>AI-модель (OpenRouter)</header>
+
+    <form method="POST">
+        <label for="ai_model">
+            Имя модели
+            <input
+                type="text"
+                id="ai_model"
+                name="ai_model"
+                value="{{ current_model or '' }}"
+                placeholder="например: google/gemini-2.0-flash-001"
+                required
+            >
+        </label>
+        <small>
+            Скопируйте имя модели с
+            <a href="https://openrouter.ai/models" target="_blank">openrouter.ai/models</a>
+            и вставьте сюда. Бот подхватит новую модель при следующем цикле.
+        </small>
+
+        <br>
+
+        <details>
+            <summary>Как найти имя модели?</summary>
+            <ol>
+                <li>Зайдите на <a href="https://openrouter.ai/models" target="_blank">openrouter.ai/models</a></li>
+                <li>Найдите нужную модель (например, через поиск)</li>
+                <li>Нажмите на неё</li>
+                <li>Скопируйте строку вида <code>google/gemini-2.0-flash-001</code> из адресной строки или карточки модели</li>
+                <li>Вставьте сюда</li>
+            </ol>
+        </details>
+
+        <br>
+
+        <button type="submit">Сохранить</button>
+    </form>
+
+    <footer>
+        {% if current_model %}
+            <small>Текущая модель: <strong>{{ current_model }}</strong></small>
+        {% else %}
+            <small class="flash-error">Модель не задана! Бот не будет работать, пока вы не укажете модель.</small>
+        {% endif %}
+    </footer>
+</article>
+{% endblock %}

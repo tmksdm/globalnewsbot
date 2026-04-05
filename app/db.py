@@ -72,7 +72,7 @@ def init_db():
         )
     ''')
 
-    # --- НОВОЕ: Таблица уже виденных новостей (для экономии AI-запросов) ---
+    # --- Таблица уже виденных новостей (для экономии AI-запросов) ---
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS seen_news (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,7 +81,6 @@ def init_db():
             seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
-    # Индекс для быстрого поиска
     cursor.execute('''
         CREATE INDEX IF NOT EXISTS idx_seen_news_hash
         ON seen_news (project_name, content_hash)
@@ -95,7 +94,15 @@ def init_db():
             score INTEGER DEFAULT 0,
             published_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    ''')    
+    ''')
+
+    # === НАСТРОЙКИ (ключ-значение) ===
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    ''')
 
     conn.commit()
     conn.close()
@@ -136,7 +143,7 @@ def is_exists(project_name, content_hash):
     return exists
 
 
-# --- НОВОЕ: Функции для seen_news ---
+# --- Функции для seen_news ---
 
 def is_seen(project_name, content_hash):
     """Проверяет, видели ли мы уже эту новость (отправляли ли в AI)."""
@@ -437,6 +444,7 @@ def get_project_names():
     conn.close()
     return [row['project_name'] for row in rows]
 
+
 def add_publish_count(project_name, score):
     """Добавляет запись в счётчик публикаций (лёгкая таблица без текстов)."""
     conn = get_connection()
@@ -465,6 +473,35 @@ def get_total_stats(project_name=None):
         'total': row['cnt'] if row['cnt'] else 0,
         'avg_score': round(row['avg_score'], 1) if row['avg_score'] else 0
     }
+
+
+# ========================
+# НАСТРОЙКИ (ключ-значение)
+# ========================
+
+def get_setting(key, default=None):
+    """Читает настройку из базы. Если нет — возвращает default."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return row['value']
+    return default
+
+
+def set_setting(key, value):
+    """Записывает/обновляет настройку в базе."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = ?
+    ''', (key, value, value))
+    conn.commit()
+    conn.close()
+
 
 # Инициализация БД при импорте
 init_db()
