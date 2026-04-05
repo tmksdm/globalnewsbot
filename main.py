@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from app.config import API_ID, API_HASH, SESSION_NAME
 from app.logic import process_project_news, send_log_report
 from app.db import get_active_projects, cleanup_seen_news, cleanup_old_records
-
+from app.ai import clear_prompt_cache
 
 # Фолбэк — если в базе нет проектов, берём из файла
 from projects_config import PROJECTS as FILE_PROJECTS
@@ -69,7 +69,6 @@ async def ensure_connected(client):
         logger.warning("🔌 Клиент отключён от Telegram. Переподключаюсь...")
         try:
             await client.connect()
-            # После reconnect нужно убедиться что авторизация на месте
             if not await client.is_user_authorized():
                 logger.critical("🔥 Клиент не авторизован после переподключения!")
                 raise ConnectionError("Not authorized after reconnect")
@@ -92,7 +91,6 @@ async def safe_send_log(client, text):
 
 
 async def main():
-    # === ОДИН КЛИЕНТ НА ВЕСЬ ЖИЗНЕННЫЙ ЦИКЛ ===
     client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
     await client.start()
 
@@ -108,10 +106,13 @@ async def main():
                 cleanup_seen_news(days=3)
                 cleanup_old_records(days=7)
 
+                # Сбрасываем кэш промптов в начале цикла
+                clear_prompt_cache()
+
                 # Проверяем соединение ПЕРЕД началом цикла
                 await ensure_connected(client)
 
-                # Загружаем проекты КАЖДЫЙ ЦИКЛ (чтобы изменения из веб-панели подхватывались)
+                # Загружаем проекты КАЖДЫЙ ЦИКЛ
                 projects = load_projects()
 
                 for project in projects:
@@ -119,7 +120,6 @@ async def main():
                     try:
                         logger.info(f"👉 Обработка проекта: {p_name}")
 
-                        # Проверяем соединение перед каждым проектом тоже
                         await ensure_connected(client)
 
                         await process_project_news(client, project_conf=project, hours=1.5)
@@ -130,13 +130,12 @@ async def main():
                     except ConnectionError as e:
                         err_text = f"🔌 Потеря соединения в проекте {p_name}: {e}"
                         logger.error(err_text)
-                        # Пробуем переподключиться и продолжить
                         try:
                             await ensure_connected(client)
                             await safe_send_log(client, err_text)
                         except Exception:
                             logger.error("❌ Не удалось восстановить соединение, жду следующий цикл.")
-                            break  # Выходим из цикла проектов, ждём следующую итерацию
+                            break
 
                     except Exception as e:
                         err_text = f"⚠️ Ошибка внутри проекта {p_name}: {e}"

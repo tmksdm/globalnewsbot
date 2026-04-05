@@ -1,4 +1,5 @@
 import json
+import time
 import requests
 from app.config import OPENROUTER_API_KEY, get_ai_model
 from app.prompts import (
@@ -8,6 +9,18 @@ from app.prompts import (
     DEDUPLICATION_SYSTEM_PROMPT
 )
 from app.db import get_prompt_by_type
+
+
+# === Кэш промптов ===
+# Хранит собранные промпты в памяти, чтобы не дёргать БД на каждый вызов AI.
+# Сбрасывается в начале каждого цикла бота (вызовом clear_prompt_cache из main.py).
+_prompt_cache = {}
+
+
+def clear_prompt_cache():
+    """Сбрасывает кэш промптов. Вызывай в начале каждого цикла бота."""
+    global _prompt_cache
+    _prompt_cache = {}
 
 
 def _clean_json_response(content):
@@ -28,8 +41,13 @@ def _get_model_or_fail():
 def get_combined_prompt(prompt_type, task_type):
     """
     Собирает промпт как конструктор.
-    Сначала ищет в базе данных, потом — в файле prompts.py (фолбэк).
+    Сначала проверяет кэш, потом БД, потом файл prompts.py (фолбэк).
     """
+    # Проверяем кэш
+    cache_key = f"{prompt_type}_{task_type}"
+    if cache_key in _prompt_cache:
+        return _prompt_cache[cache_key]
+
     # 1. Пробуем взять из базы данных
     db_prompt = get_prompt_by_type(prompt_type)
 
@@ -45,9 +63,13 @@ def get_combined_prompt(prompt_type, task_type):
         theme = THEME_SETTINGS.get(prompt_type, THEME_SETTINGS["default"])
 
     if task_type == 'batch':
-        return f"{theme['role']}\n\nКРИТЕРИИ ОТБОРА:\n{theme['criteria']}\n\n{COMMON_BATCH_RULES}"
+        result = f"{theme['role']}\n\nКРИТЕРИИ ОТБОРА:\n{theme['criteria']}\n\n{COMMON_BATCH_RULES}"
     else:
-        return f"{theme['role']}\n\n{theme['summary_style']}\n\n{COMMON_SUMMARY_FORMAT}"
+        result = f"{theme['role']}\n\n{theme['summary_style']}\n\n{COMMON_SUMMARY_FORMAT}"
+
+    # Сохраняем в кэш
+    _prompt_cache[cache_key] = result
+    return result
 
 
 def pick_top_news_batch(news_list, prompt_type="default"):
@@ -90,6 +112,9 @@ def generate_summary(text, prompt_type="default"):
     model = _get_model_or_fail()
     system_prompt = get_combined_prompt(prompt_type, 'summary')
 
+    # Обрезаем текст до 3000 символов — этого достаточно для пересказа
+    trimmed_text = text[:3000]
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
@@ -98,7 +123,7 @@ def generate_summary(text, prompt_type="default"):
         "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Текст новости:\n{text}"}
+            {"role": "user", "content": f"Текст новости:\n{trimmed_text}"}
         ]
     }
     try:
@@ -113,6 +138,8 @@ def generate_summary(text, prompt_type="default"):
 
 
 def check_is_duplicate(new_text, old_news_list):
+    """Старая AI-дедупликация. Больше не используется (заменена на локальную в app/dedup.py).
+    Оставлена на случай, если захочешь вернуть."""
     if not old_news_list:
         return False
 

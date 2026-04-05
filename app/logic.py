@@ -5,7 +5,8 @@ from telethon import TelegramClient
 
 from app.config import API_ID, API_HASH, SESSION_NAME, LOG_CHANNEL_ID, TEST_CHANNEL_ID
 from app.monitor import get_messages_last_hour
-from app.ai import pick_top_news_batch, check_is_duplicate, generate_summary
+from app.ai import pick_top_news_batch, generate_summary
+from app.dedup import is_duplicate_local
 from app.db import add_news, is_exists, get_recent_news, is_seen, mark_as_seen, cleanup_seen_news, add_publish_count
 
 
@@ -96,6 +97,7 @@ async def process_project_news(client, project_conf, hours=1.6):
     p_target_id = project_conf['target_channel_id']
     p_prompt_type = project_conf.get('prompt_type', 'default')
     p_test_mode = project_conf.get('test_mode', 0)
+    p_min_score = project_conf.get('min_score', 7)
 
     # Определяем канал для публикации
     if p_test_mode and TEST_CHANNEL_ID:
@@ -113,6 +115,7 @@ async def process_project_news(client, project_conf, hours=1.6):
         "already_seen": 0,
         "ai_candidates": 0,
         "rejected_dupe": 0,
+        "rejected_low_score": 0,
         "final_score": 0,
         "winner_source": "None"
     }
@@ -138,7 +141,7 @@ async def process_project_news(client, project_conf, hours=1.6):
         if is_exists(p_name, content_hash):
             continue
 
-        # НОВОЕ: Уже отправляли в AI (но не опубликовали)?
+        # Уже отправляли в AI (но не опубликовали)?
         if is_seen(p_name, content_hash):
             seen_count += 1
             continue
@@ -151,13 +154,12 @@ async def process_project_news(client, project_conf, hours=1.6):
 
     if not valid_news:
         print(f"🧹 {p_name}: Все отсеяны локальным фильтром (из них уже видели: {seen_count}).")
-        # Если все новости уже были в AI — не пишем в лог, это нормальная ситуация
         if seen_count == 0:
             await send_log_report(client,
                                   f"🧹 **Проект: {p_name}** [{mode_label}]\nНайдено: {len(raw_news)}, но все отсеяны (короткие или уже были).")
         return
 
-    # НОВОЕ: Помечаем все новости как виденные ПЕРЕД отправкой в AI
+    # Помечаем все новости как виденные ПЕРЕД отправкой в AI
     all_hashes = [item['hash'] for item in valid_news]
     mark_as_seen(p_name, all_hashes)
 
@@ -184,10 +186,16 @@ async def process_project_news(client, project_conf, hours=1.6):
         if idx >= len(valid_news):
             continue
 
+        # Пропускаем кандидатов ниже минимального score
+        if score < p_min_score:
+            stats["rejected_low_score"] += 1
+            print(f"   ⏭️ Кандидат #{idx} (Score: {score}) — ниже min_score ({p_min_score}), пропускаю.")
+            continue
+
         candidate_news = valid_news[idx]
         print(f"   🧐 Кандидат #{idx} (Score: {score}). Проверяем на дубли...")
 
-        if check_is_duplicate(candidate_news['text'], recent_history):
+        if is_duplicate_local(candidate_news['text'], recent_history):
             stats["rejected_dupe"] += 1
             print("   ⛔ ДУБЛЬ.")
             continue
@@ -207,11 +215,11 @@ async def process_project_news(client, project_conf, hours=1.6):
         break
 
     if not final_winner:
-        print(f"🤷‍♂️ {p_name}: Все кандидаты оказались дублями.")
+        print(f"🤷‍♂️ {p_name}: Все кандидаты оказались дублями или ниже min_score.")
         fail_report = (
             f"⚠️ **Проект: {p_name}** [{mode_label}]\n"
             f"🔎 Найдено: {stats['total_found']} | Кандидатов: {stats['ai_candidates']}\n"
-            f"🗑 Отсеяно как дубли: {stats['rejected_dupe']}\n"
+            f"🗑 Дубли: {stats['rejected_dupe']} | Низкий score: {stats['rejected_low_score']}\n"
             f"🤷‍♂️ Ничего не опубликовано."
         )
         await send_log_report(client, fail_report)
@@ -238,7 +246,7 @@ async def process_project_news(client, project_conf, hours=1.6):
                 score=final_winner['score'],
                 source_link=link_source
             )
-            add_publish_count(p_name, final_winner['score'])  # <-- новая строка
+            add_publish_count(p_name, final_winner['score'])
             print(f"✅ {p_name}: Опубликовано в ПРОД!")
         else:
             print(f"🧪 {p_name}: Опубликовано в ТЕСТ-канал (в базу НЕ сохранено).")
@@ -253,7 +261,7 @@ async def process_project_news(client, project_conf, hours=1.6):
 
         report_text = (
             f"🚀 <b>Проект: {p_name}</b> [{mode_label}]\n"
-            f"📊 Найдено: {stats['total_found']} | Новых: {stats['local_filtered']} | Кандидатов: {stats['ai_candidates']} | Дублей: {stats['rejected_dupe']}\n"
+            f"📊 Найдено: {stats['total_found']} | Новых: {stats['local_filtered']} | Кандидатов: {stats['ai_candidates']} | Дубли: {stats['rejected_dupe']} | Низкий score: {stats['rejected_low_score']}\n"
             f"🏆 Источник: {stats['winner_source']} ({stats['final_score']}/10)\n"
             f"{final_link_str}"
         )
