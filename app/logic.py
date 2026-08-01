@@ -6,7 +6,8 @@ from telethon.tl.types import MessageEntityCustomEmoji, MessageEntityTextUrl
 
 from app.config import API_ID, API_HASH, SESSION_NAME, LOG_CHANNEL_ID, TEST_CHANNEL_ID
 from app.monitor import get_messages_last_hour
-from app.ai import pick_top_news_batch, generate_summary, clean_selfpromo
+from app.ai import pick_top_news_batch, generate_summary, clean_selfpromo, shrink_summary
+from telethon.extensions import html as tg_html
 from app.dedup import is_duplicate_local
 from app.db import add_news, is_exists, get_recent_news, is_seen, mark_as_seen, cleanup_seen_news, add_publish_count
 
@@ -86,6 +87,95 @@ def trim_entities_to_text(entities, new_length):
 
     return trimmed
 
+# === ЛИМИТЫ TELEGRAM ===
+TEXT_LIMIT = 4096      # максимум символов в обычном сообщении
+CAPTION_LIMIT = 1024   # максимум символов в подписи к фото/видео/галерее
+
+
+def utf16_len(text):
+    """Длина строки так, как её считает Telegram (UTF-16), а не Python."""
+    if not text:
+        return 0
+    return len(text.encode('utf-16-le')) // 2
+
+
+_TAG_RE = re.compile(
+    r'</?(?:b|strong|i|em|u|ins|s|strike|del|code|pre|a|blockquote|tg-spoiler)'
+    r'(?:\s[^<>]*)?/?>',
+    re.IGNORECASE
+)
+_AMP_RE = re.compile(r'&(?!#?\w+;)')
+
+
+def _escape_chunk(chunk):
+    chunk = _AMP_RE.sub('&amp;', chunk)
+    return chunk.replace('<', '&lt;').replace('>', '&gt;')
+
+
+def sanitize_html(text):
+    """Оставляет только теги, понятные Telegram; всё остальное экранирует."""
+    if not text:
+        return text
+    out = []
+    pos = 0
+    for m in _TAG_RE.finditer(text):
+        out.append(_escape_chunk(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(_escape_chunk(text[pos:]))
+    return ''.join(out)
+
+
+def html_to_entities(html_text):
+    """HTML -> (чистый текст, entities). Ничего не обрезает."""
+    return tg_html.parse(sanitize_html(html_text or ''))
+
+
+def to_plain(html_text):
+    """HTML -> текст без тегов (для аварийной отправки)."""
+    plain, _ = html_to_entities(html_text)
+    return plain
+
+
+def visible_len(html_text):
+    """Сколько символов Telegram насчитает в тексте (теги не считаются)."""
+    return utf16_len(to_plain(html_text))
+
+
+def fit_summary(html_text, budget, attempts=3):
+    """
+    Добивается, чтобы текст уложился в budget символов.
+    НИЧЕГО НЕ ОБРЕЗАЕТ — только просит AI пересказать плотнее.
+    Возвращает (текст, влез_ли).
+    """
+    text = html_text
+    for i in range(attempts):
+        current = visible_len(text)
+        if current <= budget:
+            return text, True
+        target = int(budget * (0.95 - 0.05 * i))
+        print(f"   📏 {current} симв. при лимите {budget}. "
+              f"Прошу AI ужать до {target} (попытка {i + 1}/{attempts})...")
+        shorter = fix_formatting(shrink_summary(text, target))
+        if not shorter or visible_len(shorter) >= current:
+            break  # AI не смог сжать — дальше крутить бессмысленно
+        text = shorter
+    return text, visible_len(text) <= budget
+
+
+async def collect_media(client, source_peer, msg_id, grouped_id):
+    """Достаёт медиа исходного сообщения (или всего альбома)."""
+    if grouped_id:
+        album_messages = []
+        async for m in client.iter_messages(source_peer, min_id=msg_id - 10, limit=20):
+            if m.grouped_id == grouped_id:
+                album_messages.append(m)
+        if album_messages:
+            album_messages.sort(key=lambda x: x.id)
+            return [m.media for m in album_messages]
+    original_msg = await client.get_messages(source_peer, ids=msg_id)
+    return original_msg.media
+
 
 async def send_news_with_media(client, text, news_item, target_channel_id):
     """Отправляет новость как HTML-текст + медиа. Используется для режима summary."""
@@ -96,62 +186,62 @@ async def send_news_with_media(client, text, news_item, target_channel_id):
         channel_title = getattr(entity, 'title', str(target_channel_id))
         channel_username = getattr(entity, 'username', None)
 
+        # Разметку чиним ДО отправки и сразу превращаем в entities,
+        # чтобы Telegram гарантированно её принял
+        body, entities = html_to_entities(text)
+
         source_peer = news_item['peer_id']
         msg_id = news_item['msg_id']
         grouped_id = news_item['grouped_id']
-        sent_msg = None
+        first_msg = None
 
-        if not news_item['has_media']:
-            sent_msg = await client.send_message(target_channel_id, text, link_preview=False, parse_mode='html')
+        with_media = news_item['has_media'] and not news_item.get('force_no_media')
+
+        # Страховка: текст не режем никогда, лучше отдадим пост без медиа
+        if with_media and utf16_len(body) > CAPTION_LIMIT:
+            print(f"⚠️ Текст {utf16_len(body)} симв. не влезает в подпись — публикую без медиа.")
+            with_media = False
+
+        if with_media:
+            media_to_send = await collect_media(client, source_peer, msg_id, grouped_id)
+            result = await client.send_file(
+                target_channel_id, file=media_to_send,
+                caption=body, formatting_entities=entities
+            )
+            first_msg = result[0] if isinstance(result, list) else result
         else:
-            media_to_send = []
-            if grouped_id:
-                album_messages = []
-                async for m in client.iter_messages(source_peer, min_id=msg_id - 10, limit=20):
-                    if m.grouped_id == grouped_id:
-                        album_messages.append(m)
+            first_msg = await client.send_message(
+                target_channel_id, body,
+                formatting_entities=entities, link_preview=False
+            )
 
-                if album_messages:
-                    album_messages.sort(key=lambda x: x.id)
-                    media_to_send = [m.media for m in album_messages]
-                else:
-                    original_msg = await client.get_messages(source_peer, ids=msg_id)
-                    media_to_send = original_msg.media
-            else:
-                original_msg = await client.get_messages(source_peer, ids=msg_id)
-                media_to_send = original_msg.media
-
-            result = await client.send_file(target_channel_id, file=media_to_send, caption=text, parse_mode='html')
-
-            if isinstance(result, list):
-                sent_msg = result[0]
-            else:
-                sent_msg = result
-
-        if sent_msg:
+        if first_msg:
             if channel_username:
-                post_link = f"https://t.me/{channel_username}/{sent_msg.id}"
+                post_link = f"https://t.me/{channel_username}/{first_msg.id}"
             else:
                 real_id = str(entity.id).replace("-100", "")
-                post_link = f"https://t.me/c/{real_id}/{sent_msg.id}"
+                post_link = f"https://t.me/c/{real_id}/{first_msg.id}"
         return True, post_link, channel_title
+
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
+        await send_log_report(
+            client,
+            f"⚠️ <b>Сбой отправки (саммари)</b>\n<code>{_escape_chunk(str(e))}</code>"
+        )
         try:
-            await client.send_message(target_channel_id, text, parse_mode=None)
+            await client.send_message(
+                target_channel_id, to_plain(text), parse_mode=None, link_preview=False
+            )
             return True, None, channel_title
-        except:
+        except Exception as e2:
+            print(f"❌ Аварийная отправка тоже упала: {e2}")
             return False, None, channel_title
 
 
 async def send_repost_with_media(client, cleaned_text, entities, news_item, target_channel_id):
     """
     Отправляет «репост» — копию оригинального сообщения с сохранением форматирования.
-
-    cleaned_text — plain text после AI-очистки (без рекламы)
-    entities — обрезанные Telegram entities (уже без премиум-эмодзи)
-    news_item — словарь с данными оригинального сообщения
-    target_channel_id — куда публикуем
     """
     post_link = None
     channel_title = "Channel"
@@ -163,79 +253,70 @@ async def send_repost_with_media(client, cleaned_text, entities, news_item, targ
         source_peer = news_item['peer_id']
         msg_id = news_item['msg_id']
         grouped_id = news_item['grouped_id']
-        sent_msg = None
+        first_msg = None
 
-        # Собираем финальный текст: очищенный текст + приписка со ссылкой на источник
         link_source = news_item['link']
         display_name = news_item['display_name'].lower()
-
-        final_text = cleaned_text.rstrip()
         credit_prefix = "\n\n"
-        credit_offset = len(final_text) + len(credit_prefix)
-        credit_length = len(display_name)
 
-        final_text = final_text + credit_prefix + display_name
+        body = cleaned_text.rstrip()
+        final_text = body
+        final_entities = list(entities)
 
-        # Добавляем ссылку на источник как entity
-        credit_entity = MessageEntityTextUrl(
-            offset=credit_offset,
-            length=credit_length,
-            url=link_source
-        )
-        final_entities = list(entities) + [credit_entity]
-
-        if not news_item['has_media']:
-            sent_msg = await client.send_message(
-                target_channel_id,
-                final_text,
-                formatting_entities=final_entities,
-                link_preview=False
-            )
+        # ВАЖНО: Telegram считает позиции в UTF-16, а не в символах Python.
+        # Из-за обычного len() ссылка на источник уезжала, если в тексте были эмодзи.
+        credit_size = utf16_len(credit_prefix) + utf16_len(display_name)
+        if utf16_len(body) + credit_size <= TEXT_LIMIT:
+            credit_offset = utf16_len(body) + utf16_len(credit_prefix)
+            final_text = body + credit_prefix + display_name
+            final_entities.append(MessageEntityTextUrl(
+                offset=credit_offset,
+                length=utf16_len(display_name),
+                url=link_source
+            ))
         else:
-            media_to_send = []
-            if grouped_id:
-                album_messages = []
-                async for m in client.iter_messages(source_peer, min_id=msg_id - 10, limit=20):
-                    if m.grouped_id == grouped_id:
-                        album_messages.append(m)
+            print("⚠️ Репост у самого лимита — публикую без приписки с источником.")
 
-                if album_messages:
-                    album_messages.sort(key=lambda x: x.id)
-                    media_to_send = [m.media for m in album_messages]
-                else:
-                    original_msg = await client.get_messages(source_peer, ids=msg_id)
-                    media_to_send = original_msg.media
-            else:
-                original_msg = await client.get_messages(source_peer, ids=msg_id)
-                media_to_send = original_msg.media
+        with_media = news_item['has_media']
+        if with_media and utf16_len(final_text) > CAPTION_LIMIT:
+            print(f"⚠️ Репост {utf16_len(final_text)} симв. не влезает в подпись — публикую без медиа.")
+            with_media = False
 
+        if with_media:
+            media_to_send = await collect_media(client, source_peer, msg_id, grouped_id)
             result = await client.send_file(
-                target_channel_id,
-                file=media_to_send,
-                caption=final_text,
-                formatting_entities=final_entities
+                target_channel_id, file=media_to_send,
+                caption=final_text, formatting_entities=final_entities
+            )
+            first_msg = result[0] if isinstance(result, list) else result
+        else:
+            first_msg = await client.send_message(
+                target_channel_id, final_text,
+                formatting_entities=final_entities, link_preview=False
             )
 
-            if isinstance(result, list):
-                sent_msg = result[0]
-            else:
-                sent_msg = result
-
-        if sent_msg:
+        if first_msg:
             if channel_username:
-                post_link = f"https://t.me/{channel_username}/{sent_msg.id}"
+                post_link = f"https://t.me/{channel_username}/{first_msg.id}"
             else:
                 real_id = str(entity_obj.id).replace("-100", "")
-                post_link = f"https://t.me/c/{real_id}/{sent_msg.id}"
+                post_link = f"https://t.me/c/{real_id}/{first_msg.id}"
         return True, post_link, channel_title
 
     except Exception as e:
         print(f"❌ Ошибка отправки (repost): {e}")
+        await send_log_report(
+            client,
+            f"⚠️ <b>Сбой отправки (репост)</b>\n<code>{_escape_chunk(str(e))}</code>"
+        )
         try:
             fallback_text = cleaned_text.rstrip() + f"\n\n{news_item['display_name'].lower()}"
-            await client.send_message(target_channel_id, fallback_text, parse_mode=None)
+            await client.send_message(
+                target_channel_id, fallback_text, parse_mode=None, link_preview=False
+            )
             return True, None, channel_title
-        except:
+        except Exception as e2:
+            print(f"❌ Аварийная отправка тоже упала: {e2}")
             return False, None, channel_title
 
 
@@ -367,9 +448,14 @@ async def process_project_news(client, project_conf, hours=1.6):
             if not cleaned:
                 continue
 
-            # Обрезаем entities под новый (возможно укороченный) текст
-            clean_entities = strip_custom_emoji(original_entities)
-            clean_entities = trim_entities_to_text(clean_entities, len(cleaned))
+            # Подгоняем entities под новый текст. Если AI переписал текст,
+            # а не просто отрезал рекламу с конца, старые entities больше
+            # не совпадают — тогда отправляем без разметки.
+            if raw_text.startswith(cleaned.rstrip()):
+                clean_entities = strip_custom_emoji(original_entities)
+                clean_entities = trim_entities_to_text(clean_entities, utf16_len(cleaned))
+            else:
+                clean_entities = []
 
             final_winner = candidate_news
             winner_text_for_publish = cleaned
@@ -380,13 +466,33 @@ async def process_project_news(client, project_conf, hours=1.6):
             break
 
         else:
-            # --- РЕЖИМ САММАРИ (как раньше) ---
+            # --- РЕЖИМ САММАРИ ---
             print("   ✍️ Режим: САММАРИ. Генерируем пересказ...")
-            raw_summary = generate_summary(candidate_news['text'], prompt_type=p_prompt_type)
+
+            # Считаем бюджет так, чтобы пост ушёл ОДНИМ сообщением
+            # вместе с картинкой или галереей
+            reserve = len(candidate_news['display_name']) + 3
+            if p_test_mode:
+                reserve += len(f"[ТЕСТ: {p_name}]") + 2
+            reserve += 10  # запас
+            if candidate_news['has_media']:
+                budget = CAPTION_LIMIT - reserve
+            else:
+                budget = TEXT_LIMIT - reserve
+
+            raw_summary = generate_summary(
+                candidate_news['text'], prompt_type=p_prompt_type, max_chars=budget
+            )
             if not raw_summary:
                 continue
 
             clean_summary = fix_formatting(raw_summary)
+            clean_summary, fits = fit_summary(clean_summary, budget)
+
+            if not fits and candidate_news['has_media']:
+                # Текст не режем ни при каких условиях — публикуем целиком, но без медиа
+                candidate_news['force_no_media'] = True
+                print("   ⚠️ AI не уложился в лимит подписи — пост уйдёт без медиа.")
 
             final_winner = candidate_news
             winner_text_for_publish = clean_summary
@@ -418,7 +524,7 @@ async def process_project_news(client, project_conf, hours=1.6):
             test_prefix = f"[ТЕСТ: {p_name}]\n\n"
             winner_text_for_publish = test_prefix + winner_text_for_publish
             # Сдвигаем все entities на длину префикса
-            shift = len(test_prefix)
+            shift = utf16_len(test_prefix)
             shifted_entities = []
             for e in winner_entities_for_publish:
                 try:

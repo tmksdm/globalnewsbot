@@ -108,9 +108,18 @@ def pick_top_news_batch(news_list, prompt_type="default"):
         return []
 
 
-def generate_summary(text, prompt_type="default"):
+def generate_summary(text, prompt_type="default", max_chars=None):
     model = _get_model_or_fail()
     system_prompt = get_combined_prompt(prompt_type, 'summary')
+
+    if max_chars:
+        system_prompt += (
+            f"\n\nЖЁСТКИЙ ЛИМИТ ДЛИНЫ: итоговый текст обязан уложиться в {max_chars} "
+            "символов вместе с пробелами. Это не обрезка, а более плотный пересказ. "
+            "Текст должен быть логически законченным, заканчиваться точкой и передавать "
+            "весь смысл исходной новости. Никаких многоточий и оборванных фраз. "
+            "Если не помещаешься — убирай второстепенные подробности, а не концовку."
+        )
 
     # Обрезаем текст до 3000 символов — этого достаточно для пересказа
     trimmed_text = text[:3000]
@@ -135,6 +144,44 @@ def generate_summary(text, prompt_type="default"):
     except Exception as e:
         print(f"❌ AI Summary Error: {e}")
         return None
+
+def shrink_summary(text, max_chars):
+    """Просит AI ужать готовый текст до нужной длины без потери смысла."""
+    model = _get_model_or_fail()
+
+    system_prompt = (
+        f"Ты — редактор. Сожми присланный текст так, чтобы он уложился "
+        f"в {max_chars} символов вместе с пробелами.\n\n"
+        "ПРАВИЛА:\n"
+        "- Сохрани все ключевые факты: кто, что, где, когда, цифры, названия.\n"
+        "- Убирай второстепенные детали, повторы, вводные обороты.\n"
+        "- Текст обязан быть логически законченным и заканчиваться точкой.\n"
+        "- Никаких многоточий, обрывов и фраз вроде «и другое».\n"
+        "- Сохрани теги <b> и <i>, если они были. Новую разметку не добавляй.\n\n"
+        'ФОРМАТ ОТВЕТА (строго JSON): {"summary": "Текст..."}'
+    )
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    data = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": text}
+        ]
+    }
+    try:
+        response = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                                 headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        content = response.json()['choices'][0]['message']['content']
+        parsed = json.loads(_clean_json_response(content))
+        return parsed.get("summary", text)
+    except Exception as e:
+        print(f"❌ AI Shrink Error: {e}")
+        return text
 
 
 def clean_selfpromo(text):
